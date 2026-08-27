@@ -288,6 +288,22 @@
   }
   .gpx-attach button{background:none; border:none; color:var(--red); font-size:12.5px; font-weight:700; cursor:pointer; text-decoration:underline; padding:0;}
 
+  .doc-row{display:flex; align-items:center; gap:10px; background:var(--sage-soft); border-radius:14px; padding:10px 12px; margin-top:8px;}
+  .doc-icon{font-size:22px; flex:none;}
+  .doc-info{flex:1; min-width:0;}
+  .doc-name{font-size:14px; font-weight:700; color:var(--forest); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+  .doc-meta{font-size:12px; color:#5b6960; margin-top:1px;}
+  .doc-action{
+    flex:none; width:36px; height:36px; border-radius:50%; display:flex; align-items:center; justify-content:center;
+    background:#fff; border:1px solid var(--line); text-decoration:none; color:inherit; cursor:pointer; font-size:15px;
+  }
+  .doc-action-btn{background:none; border:none; color:#8a9089;}
+
+  .going-summary{display:flex; flex-direction:column; gap:14px;}
+  .going-summary-driver{font-size:14px; font-weight:700; color:var(--forest); margin-bottom:4px;}
+  .going-summary-passenger{font-size:13.5px; color:#3a4a3f; padding-left:22px; line-height:1.7;}
+  .going-summary-passenger.muted{color:#8a9089; font-style:italic;}
+
   .level-block{border-top:1px solid var(--line); padding-top:12px; margin-top:12px;}
   .level-block:first-child{border-top:none; margin-top:0; padding-top:0;}
   .level-name{font-size:15px; font-weight:700;}
@@ -401,6 +417,13 @@ function toMapsLink(value) {
 
 function gpxDownloadHref(gpxContent) {
   return `data:application/gpx+xml;charset=utf-8,${encodeURIComponent(gpxContent)}`;
+}
+
+function fmtFileSize(bytes) {
+  if (bytes == null) return '';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function parseGpxPoints(gpxText) {
@@ -669,6 +692,35 @@ function CompassMark() {
   );
 }
 
+function DocumentsSection({ title, docs, onUpload, onDelete, canEdit, uploading }) {
+  return (
+    <div>
+      <div className="row-between">
+        <div className="eyebrow" style={{marginBottom:0}}>{title}</div>
+        {canEdit && (
+          <label className="btn small secondary" style={{cursor: uploading ? 'default' : 'pointer', opacity: uploading ? 0.6 : 1}}>
+            {uploading ? 'Uploading…' : '📎 Upload PDF/Word'}
+            <input type="file" accept=".pdf,.doc,.docx" style={{display:'none'}} disabled={uploading}
+              onChange={e => { const f = e.target.files && e.target.files[0]; if (f) onUpload(f); e.target.value = ''; }} />
+          </label>
+        )}
+      </div>
+      {docs.length === 0 && <div className="empty">No documents yet.</div>}
+      {docs.map(doc => (
+        <div className="doc-row" key={doc.id}>
+          <div className="doc-icon">📘</div>
+          <div className="doc-info">
+            <div className="doc-name">{doc.file_name}</div>
+            <div className="doc-meta">{fmtFileSize(doc.file_size)}{doc.uploaded_by ? ` · added by ${doc.uploaded_by}` : ''}</div>
+          </div>
+          <a className="doc-action" href={doc.file_url} target="_blank" rel="noopener noreferrer" title="Open / download">📤</a>
+          {canEdit && <button className="doc-action doc-action-btn" onClick={() => onDelete(doc)} title="Delete">✕</button>}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function Toast({ text }) {
   if (!text) return null;
   return <div className="toast">{text}</div>;
@@ -737,6 +789,7 @@ function App() {
   const [tripSignups, setTripSignups] = useState([]);
   const [tripDrivers, setTripDrivers] = useState([]);
   const [tripAttendees, setTripAttendees] = useState([]);
+  const [tripDocuments, setTripDocuments] = useState([]);
   const [showTripForm, setShowTripForm] = useState(false);
   const [editingTrip, setEditingTrip] = useState(false);
   const [tripForm, setTripForm] = useState({ name: '', start_date: '', end_date: '', organisers: [], details: '', floating_group_label: '', is_private: false });
@@ -850,21 +903,23 @@ function App() {
   }, []);
 
   const loadTripDetail = useCallback(async (tripId) => {
-    if (!tripId) { setTripDays([]); setTripLevels([]); setTripSignups([]); setTripDrivers([]); setTripAttendees([]); return; }
+    if (!tripId) { setTripDays([]); setTripLevels([]); setTripSignups([]); setTripDrivers([]); setTripAttendees([]); setTripDocuments([]); return; }
     const { data: days } = await sb.from('trip_days').select('*').eq('trip_id', tripId).order('day_date');
     const dayList = days || [];
     setTripDays(dayList);
     const dayIds = dayList.map(d => d.id);
-    const [levelsRes, signupsRes, driversRes, attendeesRes] = await Promise.all([
+    const [levelsRes, signupsRes, driversRes, attendeesRes, documentsRes] = await Promise.all([
       sb.from('trip_day_levels').select('*').eq('trip_id', tripId),
       dayIds.length ? sb.from('trip_signups').select('*').in('trip_day_id', dayIds) : Promise.resolve({ data: [] }),
       sb.from('trip_drivers').select('*').eq('trip_id', tripId),
       sb.from('trip_attendees').select('*').eq('trip_id', tripId),
+      sb.from('walk_documents').select('*').eq('trip_id', tripId).order('created_at'),
     ]);
     setTripLevels(levelsRes.data || []);
     setTripSignups(signupsRes.data || []);
     setTripDrivers(driversRes.data || []);
     setTripAttendees(attendeesRes.data || []);
+    setTripDocuments(documentsRes.data || []);
   }, []);
 
   useEffect(() => { loadTripDetail(selectedTripId); setSelectedLevelId(null); }, [selectedTripId]);
@@ -1287,6 +1342,51 @@ function App() {
 
   useEffect(() => { loadSignups(selectedEventId); }, [selectedEventId]);
 
+  const [eventDocuments, setEventDocuments] = useState([]);
+  const loadEventDocuments = useCallback(async (eventId) => {
+    if (!eventId) { setEventDocuments([]); return; }
+    const { data } = await sb.from('walk_documents').select('*').eq('event_id', eventId).order('created_at');
+    setEventDocuments(data || []);
+  }, []);
+
+  useEffect(() => { loadEventDocuments(selectedEventId); }, [selectedEventId]);
+
+  const [uploadingDoc, setUploadingDoc] = useState(false);
+
+  const uploadDocument = async (file, scope, onDone) => {
+    if (!file) return;
+    setUploadingDoc(true);
+    const safeName = file.name.replace(/[^a-zA-Z0-9.\-_ ]/g, '_');
+    const prefix = scope.level_id ? `level/${scope.level_id}` : scope.trip_id ? `trip/${scope.trip_id}` : `event/${scope.event_id}`;
+    const path = `${prefix}/${Date.now()}_${safeName}`;
+    const { error: upErr } = await sb.storage.from('walk-documents').upload(path, file);
+    if (upErr) { setUploadingDoc(false); flashToast('Could not upload file'); return; }
+    const { data: urlData } = sb.storage.from('walk-documents').getPublicUrl(path);
+    const { error: dbErr } = await sb.from('walk_documents').insert({
+      event_id: scope.event_id || null,
+      trip_id: scope.trip_id || null,
+      level_id: scope.level_id || null,
+      file_name: file.name,
+      file_path: path,
+      file_url: urlData.publicUrl,
+      content_type: file.type || null,
+      file_size: file.size,
+      uploaded_by: myName || 'Someone',
+    });
+    setUploadingDoc(false);
+    if (dbErr) { flashToast('Could not save document'); return; }
+    flashToast('Document uploaded');
+    if (onDone) onDone();
+  };
+
+  const deleteDocument = async (doc, onDone) => {
+    if (!window.confirm(`Delete "${doc.file_name}"?`)) return;
+    await sb.storage.from('walk-documents').remove([doc.file_path]);
+    await sb.from('walk_documents').delete().eq('id', doc.id);
+    flashToast('Document deleted');
+    if (onDone) onDone();
+  };
+
   const selectedEvent = useMemo(() => events.find(e => e.id === selectedEventId), [events, selectedEventId]);
   const visibleEvents = useMemo(() => events.filter(e => !e.is_private || isMine(e.created_by)), [events, isMine]);
   const canViewSelectedEvent = !selectedEvent || !selectedEvent.is_private || isMine(selectedEvent.created_by);
@@ -1687,10 +1787,53 @@ function App() {
               </div>
 
               <div className="card">
-                <div className="day-header" onClick={() => setWhosInOpen(o => !o)}>
-                  <div className="eyebrow" style={{marginBottom:0}}>Who's in</div>
-                  <span className="chevron">{whosInOpen ? '▾' : '▸'}</span>
-                </div>
+                <DocumentsSection
+                  title="Documents"
+                  docs={eventDocuments}
+                  canEdit={isOrganiserOfSelected}
+                  uploading={uploadingDoc}
+                  onUpload={(file) => uploadDocument(file, { event_id: selectedEvent.id }, () => loadEventDocuments(selectedEvent.id))}
+                  onDelete={(doc) => deleteDocument(doc, () => loadEventDocuments(selectedEvent.id))}
+                />
+              </div>
+
+              <div className="card">
+                <div className="eyebrow" style={{marginBottom:8}}>Who's going</div>
+                {(() => {
+                  const walking = activeMembers.filter(m => { const s = signupFor(m.name); return s && s.going_walk; });
+                  if (walking.length === 0) return <div className="empty">No one's marked as going yet.</div>;
+                  const drivers = walking.filter(m => signupFor(m.name).driving);
+                  const nonDrivers = walking.filter(m => !signupFor(m.name).driving);
+                  const unassigned = nonDrivers.filter(m => !signupFor(m.name).passenger_of);
+                  return (
+                    <div className="going-summary">
+                      {drivers.map(d => {
+                        const passengers = nonDrivers.filter(m => signupFor(m.name).passenger_of === d.name);
+                        return (
+                          <div key={d.id}>
+                            <div className="going-summary-driver">🚗 {d.name}</div>
+                            {passengers.length > 0 ? (
+                              passengers.map(p => <div className="going-summary-passenger" key={p.id}>{p.name}</div>)
+                            ) : (
+                              <div className="going-summary-passenger muted">No passengers</div>
+                            )}
+                          </div>
+                        );
+                      })}
+                      {unassigned.length > 0 && (
+                        <div>
+                          <div className="going-summary-driver">🚶 Own transport</div>
+                          {unassigned.map(p => <div className="going-summary-passenger" key={p.id}>{p.name}</div>)}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+
+                <button className="btn small secondary" style={{marginTop:14}} onClick={() => setWhosInOpen(o => !o)}>
+                  {whosInOpen ? 'Hide attendance editor' : 'Edit attendance'}
+                </button>
+
                 {whosInOpen && (
                   <React.Fragment>
                     <input className="search" type="text" placeholder="Find your name…" value={search} onChange={e => setSearch(e.target.value)} style={{marginTop:10}} />
@@ -1704,94 +1847,53 @@ function App() {
                     {filteredMembers.map(m => {
                       const s = signupFor(m.name);
                       const editable = canEditRow(m.name);
-                      const isDriving = s && s.driving;
-                      return (
-                        <div key={m.id}>
-                          <div className={"member-row" + (editable ? '' : ' locked')}>
-                            <div className="member-name">{m.name}{!editable && ' 🔒'}</div>
-                            <div className="toggle-group">
-                              <div className={"toggle" + (s && s.going_walk ? ' on' : '') + (editable ? '' : ' locked')} onClick={() => toggleFlag(m.name, 'going_walk')} title="Walk">W</div>
-                              <div className={"toggle" + (s && s.going_lunch ? ' on lunch' : '') + (editable ? '' : ' locked')} onClick={() => toggleFlag(m.name, 'going_lunch')} title="Lunch">L</div>
-                              <div className={"toggle" + (s && s.driving ? ' on drive' : '') + (editable ? '' : ' locked')} onClick={() => toggleFlag(m.name, 'driving')} title="Driving">D</div>
-                              <div className={"toggle" + (s && s.driving && s.can_give_lift !== false ? ' on lift' : '') + (editable ? '' : ' locked') + (s && s.driving ? '' : ' invisible')}
-                                onClick={() => setCanGiveLift(m.name, !(s.can_give_lift !== false))} title="Can give a lift">+</div>
-                            </div>
-                          </div>
-                          {isDriving && (
-                            <div className="passenger-picker">
-                              <span className="passenger-picker-label">Passengers:</span>
-                              {activeMembers.filter(gm => gm.name !== m.name && signupFor(gm.name) && signupFor(gm.name).going_walk && !signupFor(gm.name).driving).length === 0 && (
-                                <span style={{fontSize:12.5, color:'#8a9089'}}>No one else needs a lift</span>
-                              )}
-                              {activeMembers.filter(gm => gm.name !== m.name && signupFor(gm.name) && signupFor(gm.name).going_walk && !signupFor(gm.name).driving).map(gm => {
-                                const gs = signupFor(gm.name);
-                                const checked = !!(gs && gs.passenger_of === m.name);
-                                return (
-                                  <label className="passenger-check" key={gm.id}>
-                                    <input type="checkbox" checked={checked} disabled={!editable}
-                                      onChange={() => setPassengerOf(gm.name, checked ? '' : m.name)} />
-                                    {gm.name}
-                                  </label>
-                                );
-                              })}
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </React.Fragment>
-                )}
-              </div>
-
-              {(() => {
-                const driverMembers = activeMembers.filter(m => { const s = signupFor(m.name); return s && s.driving; });
-                const liftDriverNames = driverMembers
-                  .filter(m => signupFor(m.name).can_give_lift !== false)
-                  .map(m => m.name);
-                let needsLiftMembers = activeMembers.filter(m => { const s = signupFor(m.name); return s && s.going_walk && !s.driving; });
-                if (needsLiftMembers.length === 0) return null;
-                if (liftSortMode === 'driver') {
-                  needsLiftMembers = [...needsLiftMembers].sort((a, b) => {
-                    const da = signupFor(a.name).passenger_of || '\uffff';
-                    const db = signupFor(b.name).passenger_of || '\uffff';
-                    if (da !== db) return da.localeCompare(db);
-                    return a.name.localeCompare(b.name);
-                  });
-                }
-                return (
-                  <div className="card">
-                    <div className="row-between">
-                      <div className="eyebrow" style={{marginBottom:0}}>Needs a lift</div>
-                      <div className="sort-toggle">
-                        <span style={{fontSize:11, color:'#8a9089', fontWeight:700, padding:'5px 6px 5px 10px'}}>Sort:</span>
-                        <button className={liftSortMode === 'name' ? 'active' : ''} onClick={() => setLiftSortMode('name')}>Name</button>
-                        <button className={liftSortMode === 'driver' ? 'active' : ''} onClick={() => setLiftSortMode('driver')}>Driver</button>
-                      </div>
-                    </div>
-                    {liftDriverNames.length === 0 && <p style={{fontSize:13, color:'#8a9089', margin:'4px 0 12px'}}>No one's able to give a lift yet — tick "+" next to a driver in the list above.</p>}
-                    <div className="lift-header">
-                      <span>Name</span>
-                      <span>Driver</span>
-                    </div>
-                    {needsLiftMembers.map(m => {
-                      const s = signupFor(m.name);
-                      const editable = canEditRow(m.name);
                       return (
                         <div className={"member-row" + (editable ? '' : ' locked')} key={m.id}>
                           <div className="member-name">{m.name}{!editable && ' 🔒'}</div>
-                          <select className="lift-select" value={s.passenger_of || ''} disabled={!editable}
-                            onChange={e => setPassengerOf(m.name, e.target.value)}>
-                            <option value="">— no lift assigned —</option>
-                            {liftDriverNames.map(dn => (
-                              <option key={dn} value={dn}>{dn}</option>
-                            ))}
-                          </select>
+                          <div className="toggle-group">
+                            <div className={"toggle" + (s && s.going_walk ? ' on' : '') + (editable ? '' : ' locked')} onClick={() => toggleFlag(m.name, 'going_walk')} title="Walk">W</div>
+                            <div className={"toggle" + (s && s.going_lunch ? ' on lunch' : '') + (editable ? '' : ' locked')} onClick={() => toggleFlag(m.name, 'going_lunch')} title="Lunch">L</div>
+                            <div className={"toggle" + (s && s.driving ? ' on drive' : '') + (editable ? '' : ' locked')} onClick={() => toggleFlag(m.name, 'driving')} title="Driving">D</div>
+                            <div className={"toggle" + (s && s.driving && s.can_give_lift !== false ? ' on lift' : '') + (editable ? '' : ' locked') + (s && s.driving ? '' : ' invisible')}
+                              onClick={() => setCanGiveLift(m.name, !(s.can_give_lift !== false))} title="Can give a lift">+</div>
+                          </div>
                         </div>
                       );
                     })}
-                  </div>
-                );
-              })()}
+
+                    {(() => {
+                      const driverMembers = activeMembers.filter(m => { const s = signupFor(m.name); return s && s.driving; });
+                      const liftDriverNames = driverMembers
+                        .filter(m => signupFor(m.name).can_give_lift !== false)
+                        .map(m => m.name);
+                      const needsLiftMembers = activeMembers.filter(m => { const s = signupFor(m.name); return s && s.going_walk && !s.driving; });
+                      if (needsLiftMembers.length === 0) return null;
+                      return (
+                        <div style={{marginTop:16}}>
+                          <div className="eyebrow" style={{marginBottom:8}}>Assign lifts</div>
+                          {liftDriverNames.length === 0 && <p style={{fontSize:13, color:'#8a9089', margin:'0 0 12px'}}>No one's able to give a lift yet — tick "+" next to a driver above.</p>}
+                          {needsLiftMembers.map(m => {
+                            const s = signupFor(m.name);
+                            const editable = canEditRow(m.name);
+                            return (
+                              <div className={"member-row" + (editable ? '' : ' locked')} key={m.id}>
+                                <div className="member-name">{m.name}{!editable && ' 🔒'}</div>
+                                <select className="lift-select" value={s.passenger_of || ''} disabled={!editable}
+                                  onChange={e => setPassengerOf(m.name, e.target.value)}>
+                                  <option value="">— no lift assigned —</option>
+                                  {liftDriverNames.map(dn => (
+                                    <option key={dn} value={dn}>{dn}</option>
+                                  ))}
+                                </select>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      );
+                    })()}
+                  </React.Fragment>
+                )}
+              </div>
             </React.Fragment>
           )}
 
@@ -1976,6 +2078,16 @@ function App() {
 
           {!selectedLevel && (
           <React.Fragment>
+          <div className="card">
+            <DocumentsSection
+              title="Trip documents"
+              docs={tripDocuments.filter(d => d.level_id == null)}
+              canEdit={isTripOrganiser}
+              uploading={uploadingDoc}
+              onUpload={(file) => uploadDocument(file, { trip_id: selectedTrip.id }, () => loadTripDetail(selectedTrip.id))}
+              onDelete={(doc) => deleteDocument(doc, () => loadTripDetail(selectedTrip.id))}
+            />
+          </div>
           <div className="card">
             <div className="eyebrow">Walks by day</div>
             {tripDays.length === 0 && <div className="empty">No days yet.</div>}
@@ -2181,10 +2293,41 @@ function App() {
           </div>
 
           <div className="card">
-            <div className="day-header" onClick={() => setTripGoingOpen(o => !o)}>
-              <div className="eyebrow" style={{marginBottom:0}}>Who's going &amp; driving</div>
-              <span className="chevron">{tripGoingOpen ? '▾' : '▸'}</span>
-            </div>
+            <div className="eyebrow" style={{marginBottom:8}}>Who's going &amp; driving</div>
+            {(() => {
+              if (goingMembers.length === 0) return <div className="empty">No one's marked as going yet.</div>;
+              const drivers = goingMembers.filter(m => { const d = driverFor(m.name); return d && d.driving; });
+              const nonDrivers = goingMembers.filter(m => { const d = driverFor(m.name); return !(d && d.driving); });
+              const unassigned = nonDrivers.filter(m => { const d = driverFor(m.name); return !(d && d.passenger_of); });
+              return (
+                <div className="going-summary">
+                  {drivers.map(d => {
+                    const passengers = nonDrivers.filter(m => { const dd = driverFor(m.name); return dd && dd.passenger_of === d.name; });
+                    return (
+                      <div key={d.id}>
+                        <div className="going-summary-driver">🚗 {d.name}</div>
+                        {passengers.length > 0 ? (
+                          passengers.map(p => <div className="going-summary-passenger" key={p.id}>{p.name}</div>)
+                        ) : (
+                          <div className="going-summary-passenger muted">No passengers</div>
+                        )}
+                      </div>
+                    );
+                  })}
+                  {unassigned.length > 0 && (
+                    <div>
+                      <div className="going-summary-driver">🚶 Own transport</div>
+                      {unassigned.map(p => <div className="going-summary-passenger" key={p.id}>{p.name}</div>)}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+
+            <button className="btn small secondary" style={{marginTop:14}} onClick={() => setTripGoingOpen(o => !o)}>
+              {tripGoingOpen ? 'Hide attendance editor' : 'Edit attendance'}
+            </button>
+
             {tripGoingOpen && (
               <React.Fragment>
                 <input className="search" type="text" placeholder="Find your name…" value={search} onChange={e => setSearch(e.target.value)} style={{marginTop:10}} />
@@ -2197,103 +2340,54 @@ function App() {
                   const a = attendeeFor(m.name);
                   const d = driverFor(m.name);
                   const editable = canEditTripPerson(m.name);
-                  const isDriving = d && d.driving;
                   return (
-                    <div key={m.id}>
-                      <div className={"member-row" + (editable ? '' : ' locked')}>
-                        <div className="member-name">{m.name}{!editable && ' 🔒'}</div>
-                        <div className="toggle-group">
-                          <div className={"toggle" + (a && a.going ? ' on' : '') + (editable ? '' : ' locked')}
-                            onClick={() => setGoing(m.name, !(a && a.going))} title="Going">✓</div>
-                          <div className={"toggle" + (d && d.driving ? ' on' : '') + (editable ? '' : ' locked')}
-                            onClick={() => setDriving(m.name, !(d && d.driving))} title="Driving">🚗</div>
-                          <div className={"toggle" + (d && d.driving && d.can_give_lift !== false ? ' on lift' : '') + (editable ? '' : ' locked') + (d && d.driving ? '' : ' invisible')}
-                            onClick={() => setTripCanGiveLift(m.name, !(d.can_give_lift !== false))} title="Can give a lift">+</div>
-                        </div>
+                    <div className={"member-row" + (editable ? '' : ' locked')} key={m.id}>
+                      <div className="member-name">{m.name}{!editable && ' 🔒'}</div>
+                      <div className="toggle-group">
+                        <div className={"toggle" + (a && a.going ? ' on' : '') + (editable ? '' : ' locked')}
+                          onClick={() => setGoing(m.name, !(a && a.going))} title="Going">✓</div>
+                        <div className={"toggle" + (d && d.driving ? ' on' : '') + (editable ? '' : ' locked')}
+                          onClick={() => setDriving(m.name, !(d && d.driving))} title="Driving">🚗</div>
+                        <div className={"toggle" + (d && d.driving && d.can_give_lift !== false ? ' on lift' : '') + (editable ? '' : ' locked') + (d && d.driving ? '' : ' invisible')}
+                          onClick={() => setTripCanGiveLift(m.name, !(d.can_give_lift !== false))} title="Can give a lift">+</div>
                       </div>
-                      {isDriving && (
-                        <div className="passenger-picker">
-                          <span className="passenger-picker-label">Passengers:</span>
-                          {goingMembers.filter(gm => gm.name !== m.name && !(driverFor(gm.name) && driverFor(gm.name).driving)).length === 0 && (
-                            <span style={{fontSize:12.5, color:'#8a9089'}}>No one else needs a lift</span>
-                          )}
-                          {goingMembers.filter(gm => gm.name !== m.name && !(driverFor(gm.name) && driverFor(gm.name).driving)).map(gm => {
-                            const gd = driverFor(gm.name);
-                            const checked = !!(gd && gd.passenger_of === m.name);
-                            return (
-                              <label className="passenger-check" key={gm.id}>
-                                <input type="checkbox" checked={checked} disabled={!editable}
-                                  onChange={() => setTripPassengerOf(gm.name, checked ? '' : m.name)} />
-                                {gm.name}
-                              </label>
-                            );
-                          })}
-                        </div>
-                      )}
                     </div>
                   );
                 })}
+
+                {(() => {
+                  const driverMembers = goingMembers.filter(m => { const d = driverFor(m.name); return d && d.driving; });
+                  const liftDriverNames = driverMembers
+                    .filter(m => driverFor(m.name).can_give_lift !== false)
+                    .map(m => m.name);
+                  const needsLift = goingMembers.filter(m => { const d = driverFor(m.name); return !(d && d.driving); });
+                  if (needsLift.length === 0) return null;
+                  return (
+                    <div style={{marginTop:16}}>
+                      <div className="eyebrow" style={{marginBottom:8}}>Assign lifts</div>
+                      {liftDriverNames.length === 0 && <p style={{fontSize:13, color:'#8a9089', margin:'0 0 12px'}}>No one's able to give a lift yet — tick "+" next to a driver above.</p>}
+                      {needsLift.map(m => {
+                        const d = driverFor(m.name);
+                        const editable = canEditTripPerson(m.name);
+                        return (
+                          <div className={"member-row" + (editable ? '' : ' locked')} key={m.id}>
+                            <div className="member-name">{m.name}{!editable && ' 🔒'}</div>
+                            <select className="lift-select" value={(d && d.passenger_of) || ''} disabled={!editable}
+                              onChange={e => setTripPassengerOf(m.name, e.target.value)}>
+                              <option value="">— no lift assigned —</option>
+                              {liftDriverNames.map(dn => (
+                                <option key={dn} value={dn}>{dn}</option>
+                              ))}
+                            </select>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })()}
               </React.Fragment>
             )}
           </div>
-
-          {(() => {
-            const driverMembers = goingMembers.filter(m => { const d = driverFor(m.name); return d && d.driving; });
-            const liftDriverNames = driverMembers
-              .filter(m => driverFor(m.name).can_give_lift !== false)
-              .map(m => m.name);
-            let needsLift = goingMembers.filter(m => { const d = driverFor(m.name); return !(d && d.driving); });
-            if (needsLift.length === 0) return null;
-            if (tripLiftSortMode === 'driver') {
-              needsLift = [...needsLift].sort((a, b) => {
-                const da = (driverFor(a.name) && driverFor(a.name).passenger_of) || '\uffff';
-                const db = (driverFor(b.name) && driverFor(b.name).passenger_of) || '\uffff';
-                if (da !== db) return da.localeCompare(db);
-                return a.name.localeCompare(b.name);
-              });
-            }
-            return (
-              <div className="card">
-                <div className="day-header" onClick={() => setTripLiftOpen(o => !o)}>
-                  <div className="eyebrow" style={{marginBottom:0}}>Needs a lift{!tripLiftOpen && needsLift.length ? ` (${needsLift.length})` : ''}</div>
-                  <span className="chevron">{tripLiftOpen ? '▾' : '▸'}</span>
-                </div>
-                {tripLiftOpen && (
-                  <React.Fragment>
-                    <div className="row-between" style={{marginTop:10}}>
-                      <span />
-                      <div className="sort-toggle">
-                        <span style={{fontSize:11, color:'#8a9089', fontWeight:700, padding:'5px 6px 5px 10px'}}>Sort:</span>
-                        <button className={tripLiftSortMode === 'name' ? 'active' : ''} onClick={() => setTripLiftSortMode('name')}>Name</button>
-                        <button className={tripLiftSortMode === 'driver' ? 'active' : ''} onClick={() => setTripLiftSortMode('driver')}>Driver</button>
-                      </div>
-                    </div>
-                    {liftDriverNames.length === 0 && <p style={{fontSize:13, color:'#8a9089', margin:'4px 0 12px'}}>No one's able to give a lift yet — tick "+" next to a driver in the list above.</p>}
-                    <div className="lift-header">
-                      <span>Name</span>
-                      <span>Driver</span>
-                    </div>
-                    {needsLift.map(m => {
-                      const d = driverFor(m.name);
-                      const editable = canEditTripPerson(m.name);
-                      return (
-                        <div className={"member-row" + (editable ? '' : ' locked')} key={m.id}>
-                          <div className="member-name">{m.name}{!editable && ' 🔒'}</div>
-                          <select className="lift-select" value={(d && d.passenger_of) || ''} disabled={!editable}
-                            onChange={e => setTripPassengerOf(m.name, e.target.value)}>
-                            <option value="">— no lift assigned —</option>
-                            {liftDriverNames.map(dn => (
-                              <option key={dn} value={dn}>{dn}</option>
-                            ))}
-                          </select>
-                        </div>
-                      );
-                    })}
-                  </React.Fragment>
-                )}
-              </div>
-            );
-          })()}
           </React.Fragment>
           )}
 
@@ -2439,6 +2533,17 @@ function App() {
                     )}
                   </div>
                 )}
+              </div>
+
+              <div className="card">
+                <DocumentsSection
+                  title="Walk report"
+                  docs={tripDocuments.filter(d => d.level_id === selectedLevel.id)}
+                  canEdit={isTripOrganiser}
+                  uploading={uploadingDoc}
+                  onUpload={(file) => uploadDocument(file, { trip_id: selectedTrip.id, level_id: selectedLevel.id }, () => loadTripDetail(selectedTrip.id))}
+                  onDelete={(doc) => deleteDocument(doc, () => loadTripDetail(selectedTrip.id))}
+                />
               </div>
 
               <div className="card">
