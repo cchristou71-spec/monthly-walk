@@ -769,6 +769,8 @@ function App() {
   const [liftSortMode, setLiftSortMode] = useState('name');
   const [whosInOpen, setWhosInOpen] = useState(true);
   const [tripGoingOpen, setTripGoingOpen] = useState(false);
+  const [tripDocsOpen, setTripDocsOpen] = useState({});
+  const toggleTripDocsOpen = (key) => setTripDocsOpen(prev => ({ ...prev, [key]: !prev[key] }));
   const [tripLiftOpen, setTripLiftOpen] = useState(false);
   const [tripLiftSortMode, setTripLiftSortMode] = useState('name');
   const [newMemberEmail, setNewMemberEmail] = useState('');
@@ -2174,36 +2176,6 @@ function App() {
           {!selectedLevel && (
           <React.Fragment>
           <div className="card">
-            <DocumentsSection
-              title="Trip documents"
-              docs={tripDocuments.filter(d => d.level_id == null && d.category === 'general')}
-              canEdit={isTripOrganiser}
-              uploading={uploadingDoc}
-              onUpload={(file) => uploadDocument(file, { trip_id: selectedTrip.id, category: 'general' }, () => loadTripDetail(selectedTrip.id))}
-              onDelete={(doc) => deleteDocument(doc, () => loadTripDetail(selectedTrip.id))}
-            />
-          </div>
-          <div className="card">
-            <DocumentsSection
-              title="Pub menu"
-              docs={tripDocuments.filter(d => d.level_id == null && d.category === 'pub_menu')}
-              canEdit={isTripOrganiser}
-              uploading={uploadingDoc}
-              onUpload={(file) => uploadDocument(file, { trip_id: selectedTrip.id, category: 'pub_menu' }, () => loadTripDetail(selectedTrip.id))}
-              onDelete={(doc) => deleteDocument(doc, () => loadTripDetail(selectedTrip.id))}
-            />
-          </div>
-          <div className="card">
-            <DocumentsSection
-              title="Trip report"
-              docs={tripDocuments.filter(d => d.level_id == null && d.category === 'report')}
-              canEdit={isTripOrganiser}
-              uploading={uploadingDoc}
-              onUpload={(file) => uploadDocument(file, { trip_id: selectedTrip.id, category: 'report' }, () => loadTripDetail(selectedTrip.id))}
-              onDelete={(doc) => deleteDocument(doc, () => loadTripDetail(selectedTrip.id))}
-            />
-          </div>
-          <div className="card">
             <div className="eyebrow">Walks by day</div>
             {tripDays.length === 0 && <div className="empty">No days yet.</div>}
             {tripDays.map(day => {
@@ -2501,6 +2473,63 @@ function App() {
                   );
                 })()}
               </React.Fragment>
+            )}
+          </div>
+
+          <div className="card">
+            <div className="day-header" onClick={() => toggleTripDocsOpen('general')}>
+              <div className="eyebrow" style={{marginBottom:0}}>Trip documents</div>
+              <span className="chevron">{tripDocsOpen.general ? '▾' : '▸'}</span>
+            </div>
+            {tripDocsOpen.general && (
+              <div style={{marginTop:10}}>
+                <DocumentsSection
+                  title=""
+                  docs={tripDocuments.filter(d => d.level_id == null && d.category === 'general')}
+                  canEdit={isTripOrganiser}
+                  uploading={uploadingDoc}
+                  onUpload={(file) => uploadDocument(file, { trip_id: selectedTrip.id, category: 'general' }, () => loadTripDetail(selectedTrip.id))}
+                  onDelete={(doc) => deleteDocument(doc, () => loadTripDetail(selectedTrip.id))}
+                />
+              </div>
+            )}
+          </div>
+
+          <div className="card">
+            <div className="day-header" onClick={() => toggleTripDocsOpen('pub_menu')}>
+              <div className="eyebrow" style={{marginBottom:0}}>Pub menu</div>
+              <span className="chevron">{tripDocsOpen.pub_menu ? '▾' : '▸'}</span>
+            </div>
+            {tripDocsOpen.pub_menu && (
+              <div style={{marginTop:10}}>
+                <DocumentsSection
+                  title=""
+                  docs={tripDocuments.filter(d => d.level_id == null && d.category === 'pub_menu')}
+                  canEdit={isTripOrganiser}
+                  uploading={uploadingDoc}
+                  onUpload={(file) => uploadDocument(file, { trip_id: selectedTrip.id, category: 'pub_menu' }, () => loadTripDetail(selectedTrip.id))}
+                  onDelete={(doc) => deleteDocument(doc, () => loadTripDetail(selectedTrip.id))}
+                />
+              </div>
+            )}
+          </div>
+
+          <div className="card">
+            <div className="day-header" onClick={() => toggleTripDocsOpen('report')}>
+              <div className="eyebrow" style={{marginBottom:0}}>Trip report</div>
+              <span className="chevron">{tripDocsOpen.report ? '▾' : '▸'}</span>
+            </div>
+            {tripDocsOpen.report && (
+              <div style={{marginTop:10}}>
+                <DocumentsSection
+                  title=""
+                  docs={tripDocuments.filter(d => d.level_id == null && d.category === 'report')}
+                  canEdit={isTripOrganiser}
+                  uploading={uploadingDoc}
+                  onUpload={(file) => uploadDocument(file, { trip_id: selectedTrip.id, category: 'report' }, () => loadTripDetail(selectedTrip.id))}
+                  onDelete={(doc) => deleteDocument(doc, () => loadTripDetail(selectedTrip.id))}
+                />
+              </div>
             )}
           </div>
           </React.Fragment>
