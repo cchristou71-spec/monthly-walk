@@ -1472,6 +1472,58 @@ function App() {
     shareLink(url, 'My meal choices', text);
   };
 
+  const buildMealOrderBlock = (day) => {
+    const mains = tripMenuItems.filter(i => i.trip_day_id === day.id && i.category === 'main');
+    const puddings = tripMenuItems.filter(i => i.trip_day_id === day.id && i.category === 'pudding');
+    const dayChoices = tripMealChoices.filter(c => c.trip_day_id === day.id);
+
+    const countLines = ['MAINS'];
+    mains.forEach(item => {
+      const count = dayChoices.filter(c => c.main_item_id === item.id).length;
+      if (count > 0) countLines.push(`${count} x ${item.name}`);
+    });
+    if (countLines.length === 1) countLines.push('(none chosen yet)');
+    countLines.push('', 'PUDDINGS');
+    const puddingStart = countLines.length;
+    puddings.forEach(item => {
+      const count = dayChoices.filter(c => c.pudding_item_id === item.id).length;
+      if (count > 0) countLines.push(`${count} x ${item.name}`);
+    });
+    if (countLines.length === puddingStart) countLines.push('(none chosen yet)');
+
+    const nameLines = goingMembers.map(m => {
+      const choice = dayChoices.find(c => c.member_name === m.name);
+      const mainItem = mains.find(i => i.id === (choice && choice.main_item_id));
+      const puddingItem = puddings.find(i => i.id === (choice && choice.pudding_item_id));
+      if (!mainItem && !puddingItem) return null;
+      return `${m.name}: ${mainItem ? mainItem.name : '—'} / ${puddingItem ? puddingItem.name : '—'}`;
+    }).filter(Boolean);
+
+    return { hasMenu: mains.length > 0 || puddings.length > 0, countLines, nameLines };
+  };
+
+  const shareMealOrder = (day) => {
+    if (!selectedTrip) return;
+    const { countLines, nameLines } = buildMealOrderBlock(day);
+
+    const url = buildShareUrl({ trip: selectedTrip.id });
+    const text = `HDSG Walks — Meal order for ${selectedTrip.name}, ${fmtDate(day.day_date)}\n\n${countLines.join('\n')}\n\nBY PERSON\n${nameLines.length ? nameLines.join('\n') : '(no choices yet)'}`;
+    shareLink(url, 'Meal order', text);
+  };
+
+  const shareAllMealOrders = () => {
+    if (!selectedTrip) return;
+    const blocks = tripDays.map(day => {
+      const { hasMenu, countLines, nameLines } = buildMealOrderBlock(day);
+      if (!hasMenu) return null;
+      return `=== ${fmtDate(day.day_date)} ===\n\n${countLines.join('\n')}\n\nBY PERSON\n${nameLines.length ? nameLines.join('\n') : '(no choices yet)'}`;
+    }).filter(Boolean);
+    if (blocks.length === 0) { flashToast('No menu set up yet'); return; }
+    const url = buildShareUrl({ trip: selectedTrip.id });
+    const text = `HDSG Walks — Meal order for ${selectedTrip.name} (all nights)\n\n${blocks.join('\n\n')}`;
+    shareLink(url, 'Meal order — all nights', text);
+  };
+
   const selectedEvent = useMemo(() => events.find(e => e.id === selectedEventId), [events, selectedEventId]);
   const visibleEvents = useMemo(() => events.filter(e => !e.is_private || isMine(e.created_by)), [events, isMine]);
   const canViewSelectedEvent = !selectedEvent || !selectedEvent.is_private || isMine(selectedEvent.created_by);
@@ -2468,6 +2520,9 @@ function App() {
             </div>
             {mealsOpen && (
               <div style={{marginTop:10}}>
+                {isTripOrganiser && tripDays.length > 1 && (
+                  <button className="btn small secondary" style={{marginBottom:16}} onClick={shareAllMealOrders}>📤 Share order — all nights</button>
+                )}
                 {myName ? (
                   <div className="level-block" style={{background:'var(--sage-soft)', borderRadius:10, padding:12, marginBottom:16}}>
                     <div className="row-between">
@@ -2572,9 +2627,14 @@ function App() {
 
                       {(mains.length > 0 || puddings.length > 0) && (
                         <React.Fragment>
-                          <button className="btn small secondary" style={{marginTop:14}} onClick={() => toggleMealEditDay(day.id)}>
-                            {mealEditOpen[day.id] ? 'Hide meal choices' : (isTripOrganiser ? 'Edit everyone\u2019s choices (incl. yours)' : 'Choose your meal')}
-                          </button>
+                          <div className="btn-row" style={{marginTop:14}}>
+                            <button className="btn small secondary" onClick={() => toggleMealEditDay(day.id)}>
+                              {mealEditOpen[day.id] ? 'Hide meal choices' : (isTripOrganiser ? 'Edit everyone\u2019s choices (incl. yours)' : 'Choose your meal')}
+                            </button>
+                            {isTripOrganiser && (
+                              <button className="btn small secondary" onClick={() => shareMealOrder(day)}>📤 Share order</button>
+                            )}
+                          </div>
                           {mealEditOpen[day.id] && (
                             <div style={{marginTop:10}}>
                               {goingMembers.length === 0 && <div className="empty">No one's marked as going yet.</div>}
