@@ -308,7 +308,9 @@
   .menu-item-name{font-size:13.5px; color:#3a4a3f;}
   .menu-item-count{font-size:12.5px; font-weight:700; color:var(--forest); flex:none;}
   .menu-item-del{background:none; border:none; color:#b9c0b6; font-size:13px; cursor:pointer; flex:none; padding:0 0 0 8px;}
-  .meal-select{width:100%; font-size:13px; padding:6px 8px;}
+  .meal-select{width:100%; min-width:0; font-size:13px; padding:6px 8px;}
+  .meal-choice-row{padding:10px 6px; border-bottom:1px solid var(--line); border-radius:8px;}
+  .meal-choice-row:last-child{border-bottom:none;}
 
   .level-block{border-top:1px solid var(--line); padding-top:12px; margin-top:12px;}
   .level-block:first-child{border-top:none; margin-top:0; padding-top:0;}
@@ -2529,19 +2531,24 @@ function App() {
                           {mealEditOpen[day.id] && (
                             <div style={{marginTop:10}}>
                               {goingMembers.length === 0 && <div className="empty">No one's marked as going yet.</div>}
+                              {!myName && (
+                                <p style={{fontSize:12.5, color:'#8a9089', margin:'0 0 10px'}}>Tap "Switch" at the top of the screen and pick your name to see your own row highlighted here.</p>
+                              )}
                               {goingMembers.map(m => {
                                 const choice = dayChoices.find(c => c.member_name === m.name);
                                 const editable = canEditMeal(m.name);
                                 const isMe = myName && myName === m.name;
                                 return (
-                                  <div className={"member-row" + (editable ? '' : ' locked')} key={m.id} style={isMe ? {background:'var(--sage-soft)', borderRadius:8, paddingLeft:6, paddingRight:6} : null}>
-                                    <div className="member-name">{m.name}{isMe && ' (you)'}{!editable && ' 🔒'}</div>
-                                    <div style={{display:'flex', gap:6, flex:'none', width:'56%'}}>
-                                      <select className="lift-select meal-select" value={(choice && choice.main_item_id) || ''} disabled={!editable} onChange={e => setMealChoice(day.id, m.name, 'main_item_id', e.target.value)}>
+                                  <div key={m.id} className="meal-choice-row" style={isMe ? {background:'var(--sage-soft)'} : null}>
+                                    <div className="member-name" style={{marginBottom:6, fontWeight: isMe ? 800 : 500}}>
+                                      {m.name}{isMe && ' — you'}{!editable && ' 🔒'}
+                                    </div>
+                                    <div style={{display:'flex', gap:6}}>
+                                      <select className="meal-select" style={{flex:1}} value={(choice && choice.main_item_id) || ''} disabled={!editable} onChange={e => setMealChoice(day.id, m.name, 'main_item_id', e.target.value)}>
                                         <option value="">— main —</option>
                                         {mains.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
                                       </select>
-                                      <select className="lift-select meal-select" value={(choice && choice.pudding_item_id) || ''} disabled={!editable} onChange={e => setMealChoice(day.id, m.name, 'pudding_item_id', e.target.value)}>
+                                      <select className="meal-select" style={{flex:1}} value={(choice && choice.pudding_item_id) || ''} disabled={!editable} onChange={e => setMealChoice(day.id, m.name, 'pudding_item_id', e.target.value)}>
                                         <option value="">— pudding —</option>
                                         {puddings.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
                                       </select>
