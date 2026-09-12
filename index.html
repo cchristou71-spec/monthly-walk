@@ -2524,7 +2524,7 @@ function App() {
                       {(mains.length > 0 || puddings.length > 0) && (
                         <React.Fragment>
                           <button className="btn small secondary" style={{marginTop:14}} onClick={() => toggleMealEditDay(day.id)}>
-                            {mealEditOpen[day.id] ? 'Hide meal choices' : (isTripOrganiser ? 'Edit everyone\u2019s choices' : 'Choose your meal')}
+                            {mealEditOpen[day.id] ? 'Hide meal choices' : (isTripOrganiser ? 'Edit everyone\u2019s choices (incl. yours)' : 'Choose your meal')}
                           </button>
                           {mealEditOpen[day.id] && (
                             <div style={{marginTop:10}}>
@@ -2532,9 +2532,10 @@ function App() {
                               {goingMembers.map(m => {
                                 const choice = dayChoices.find(c => c.member_name === m.name);
                                 const editable = canEditMeal(m.name);
+                                const isMe = myName && myName === m.name;
                                 return (
-                                  <div className={"member-row" + (editable ? '' : ' locked')} key={m.id}>
-                                    <div className="member-name">{m.name}{!editable && ' 🔒'}</div>
+                                  <div className={"member-row" + (editable ? '' : ' locked')} key={m.id} style={isMe ? {background:'var(--sage-soft)', borderRadius:8, paddingLeft:6, paddingRight:6} : null}>
+                                    <div className="member-name">{m.name}{isMe && ' (you)'}{!editable && ' 🔒'}</div>
                                     <div style={{display:'flex', gap:6, flex:'none', width:'56%'}}>
                                       <select className="lift-select meal-select" value={(choice && choice.main_item_id) || ''} disabled={!editable} onChange={e => setMealChoice(day.id, m.name, 'main_item_id', e.target.value)}>
                                         <option value="">— main —</option>
