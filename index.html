@@ -998,6 +998,10 @@ function App() {
     return isTripOrganiser;
   }, [isTripOrganiser]);
 
+  const canEditMeal = useCallback((name) => {
+    return isTripOrganiser || !!(myName && myName === name);
+  }, [isTripOrganiser, myName]);
+
   const setDayWalkChoice = async (dayId, memberName, value) => {
     if (!canEditTripPerson(memberName)) { flashToast(myName ? `Only this trip's organiser can update that` : 'Pick who you are first'); return; }
     const existing = tripSignupFor(dayId, memberName);
@@ -1433,6 +1437,7 @@ function App() {
   };
 
   const setMealChoice = async (dayId, memberName, field, value) => {
+    if (!canEditMeal(memberName)) { flashToast(myName ? "You can only choose your own meal" : 'Pick who you are first'); return; }
     const existing = tripMealChoices.find(c => c.trip_day_id === dayId && c.member_name === memberName);
     const payload = {
       trip_day_id: dayId, member_name: memberName,
@@ -2516,25 +2521,26 @@ function App() {
                         <button className="btn small secondary" style={{marginTop:6}} onClick={() => openNewMenuItem(day.id, 'pudding')}>+ Add pudding</button>
                       )}
 
-                      {isTripOrganiser && (mains.length > 0 || puddings.length > 0) && (
+                      {(mains.length > 0 || puddings.length > 0) && (
                         <React.Fragment>
                           <button className="btn small secondary" style={{marginTop:14}} onClick={() => toggleMealEditDay(day.id)}>
-                            {mealEditOpen[day.id] ? 'Hide choices editor' : 'Edit everyone\u2019s choices'}
+                            {mealEditOpen[day.id] ? 'Hide meal choices' : (isTripOrganiser ? 'Edit everyone\u2019s choices' : 'Choose your meal')}
                           </button>
                           {mealEditOpen[day.id] && (
                             <div style={{marginTop:10}}>
                               {goingMembers.length === 0 && <div className="empty">No one's marked as going yet.</div>}
                               {goingMembers.map(m => {
                                 const choice = dayChoices.find(c => c.member_name === m.name);
+                                const editable = canEditMeal(m.name);
                                 return (
-                                  <div className="member-row" key={m.id}>
-                                    <div className="member-name">{m.name}</div>
+                                  <div className={"member-row" + (editable ? '' : ' locked')} key={m.id}>
+                                    <div className="member-name">{m.name}{!editable && ' 🔒'}</div>
                                     <div style={{display:'flex', gap:6, flex:'none', width:'56%'}}>
-                                      <select className="lift-select meal-select" value={(choice && choice.main_item_id) || ''} onChange={e => setMealChoice(day.id, m.name, 'main_item_id', e.target.value)}>
+                                      <select className="lift-select meal-select" value={(choice && choice.main_item_id) || ''} disabled={!editable} onChange={e => setMealChoice(day.id, m.name, 'main_item_id', e.target.value)}>
                                         <option value="">— main —</option>
                                         {mains.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
                                       </select>
-                                      <select className="lift-select meal-select" value={(choice && choice.pudding_item_id) || ''} onChange={e => setMealChoice(day.id, m.name, 'pudding_item_id', e.target.value)}>
+                                      <select className="lift-select meal-select" value={(choice && choice.pudding_item_id) || ''} disabled={!editable} onChange={e => setMealChoice(day.id, m.name, 'pudding_item_id', e.target.value)}>
                                         <option value="">— pudding —</option>
                                         {puddings.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
                                       </select>
