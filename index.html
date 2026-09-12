@@ -304,6 +304,12 @@
   .going-summary-passenger{font-size:13.5px; color:#3a4a3f; padding-left:22px; line-height:1.7;}
   .going-summary-passenger.muted{color:#8a9089; font-style:italic;}
 
+  .menu-item-row{display:flex; align-items:center; justify-content:space-between; gap:8px; padding:4px 0;}
+  .menu-item-name{font-size:13.5px; color:#3a4a3f;}
+  .menu-item-count{font-size:12.5px; font-weight:700; color:var(--forest); flex:none;}
+  .menu-item-del{background:none; border:none; color:#b9c0b6; font-size:13px; cursor:pointer; flex:none; padding:0 0 0 8px;}
+  .meal-select{width:100%; font-size:13px; padding:6px 8px;}
+
   .level-block{border-top:1px solid var(--line); padding-top:12px; margin-top:12px;}
   .level-block:first-child{border-top:none; margin-top:0; padding-top:0;}
   .level-name{font-size:15px; font-weight:700;}
@@ -792,6 +798,12 @@ function App() {
   const [tripDrivers, setTripDrivers] = useState([]);
   const [tripAttendees, setTripAttendees] = useState([]);
   const [tripDocuments, setTripDocuments] = useState([]);
+  const [tripMenuItems, setTripMenuItems] = useState([]);
+  const [tripMealChoices, setTripMealChoices] = useState([]);
+  const [mealsOpen, setMealsOpen] = useState(false);
+  const [mealEditOpen, setMealEditOpen] = useState({});
+  const [addingMenuItem, setAddingMenuItem] = useState(null);
+  const [menuItemForm, setMenuItemForm] = useState({ name: '', price: '' });
   const [showTripForm, setShowTripForm] = useState(false);
   const [editingTrip, setEditingTrip] = useState(false);
   const [tripForm, setTripForm] = useState({ name: '', start_date: '', end_date: '', organisers: [], details: '', floating_group_label: '', is_private: false });
@@ -905,23 +917,27 @@ function App() {
   }, []);
 
   const loadTripDetail = useCallback(async (tripId) => {
-    if (!tripId) { setTripDays([]); setTripLevels([]); setTripSignups([]); setTripDrivers([]); setTripAttendees([]); setTripDocuments([]); return; }
+    if (!tripId) { setTripDays([]); setTripLevels([]); setTripSignups([]); setTripDrivers([]); setTripAttendees([]); setTripDocuments([]); setTripMenuItems([]); setTripMealChoices([]); return; }
     const { data: days } = await sb.from('trip_days').select('*').eq('trip_id', tripId).order('day_date');
     const dayList = days || [];
     setTripDays(dayList);
     const dayIds = dayList.map(d => d.id);
-    const [levelsRes, signupsRes, driversRes, attendeesRes, documentsRes] = await Promise.all([
+    const [levelsRes, signupsRes, driversRes, attendeesRes, documentsRes, menuItemsRes, mealChoicesRes] = await Promise.all([
       sb.from('trip_day_levels').select('*').eq('trip_id', tripId),
       dayIds.length ? sb.from('trip_signups').select('*').in('trip_day_id', dayIds) : Promise.resolve({ data: [] }),
       sb.from('trip_drivers').select('*').eq('trip_id', tripId),
       sb.from('trip_attendees').select('*').eq('trip_id', tripId),
       sb.from('walk_documents').select('*').eq('trip_id', tripId).order('created_at'),
+      dayIds.length ? sb.from('trip_menu_items').select('*').in('trip_day_id', dayIds).order('sort_order') : Promise.resolve({ data: [] }),
+      dayIds.length ? sb.from('trip_meal_choices').select('*').in('trip_day_id', dayIds) : Promise.resolve({ data: [] }),
     ]);
     setTripLevels(levelsRes.data || []);
     setTripSignups(signupsRes.data || []);
     setTripDrivers(driversRes.data || []);
     setTripAttendees(attendeesRes.data || []);
     setTripDocuments(documentsRes.data || []);
+    setTripMenuItems(menuItemsRes.data || []);
+    setTripMealChoices(mealChoicesRes.data || []);
   }, []);
 
   useEffect(() => { loadTripDetail(selectedTripId); setSelectedLevelId(null); }, [selectedTripId]);
@@ -1389,6 +1405,49 @@ function App() {
     flashToast('Document deleted');
     if (onDone) onDone();
   };
+
+  const openNewMenuItem = (dayId, category) => {
+    if (!isTripOrganiser) { flashToast("Only this trip's organiser can edit the menu"); return; }
+    setAddingMenuItem({ dayId, category });
+    setMenuItemForm({ name: '', price: '' });
+  };
+  const cancelNewMenuItem = () => setAddingMenuItem(null);
+
+  const saveNewMenuItem = async () => {
+    if (!menuItemForm.name.trim()) { flashToast('Give the dish a name'); return; }
+    const { error } = await sb.from('trip_menu_items').insert({
+      trip_day_id: addingMenuItem.dayId,
+      category: addingMenuItem.category,
+      name: menuItemForm.name.trim(),
+      price: menuItemForm.price ? parseFloat(menuItemForm.price) : null,
+    });
+    if (error) { flashToast('Could not add dish'); return; }
+    setAddingMenuItem(null);
+    loadTripDetail(selectedTripId);
+  };
+
+  const deleteMenuItem = async (item) => {
+    if (!window.confirm(`Remove "${item.name}" from the menu?`)) return;
+    await sb.from('trip_menu_items').delete().eq('id', item.id);
+    loadTripDetail(selectedTripId);
+  };
+
+  const setMealChoice = async (dayId, memberName, field, value) => {
+    const existing = tripMealChoices.find(c => c.trip_day_id === dayId && c.member_name === memberName);
+    const payload = {
+      trip_day_id: dayId, member_name: memberName,
+      main_item_id: field === 'main_item_id' ? (value || null) : (existing ? existing.main_item_id : null),
+      pudding_item_id: field === 'pudding_item_id' ? (value || null) : (existing ? existing.pudding_item_id : null),
+      updated_at: new Date().toISOString(),
+    };
+    setTripMealChoices(prev => {
+      const others = prev.filter(c => !(c.trip_day_id === dayId && c.member_name === memberName));
+      return [...others, { ...(existing || {}), ...payload }];
+    });
+    await sb.from('trip_meal_choices').upsert(payload, { onConflict: 'trip_day_id,member_name' });
+  };
+
+  const toggleMealEditDay = (dayId) => setMealEditOpen(prev => ({ ...prev, [dayId]: !prev[dayId] }));
 
   const selectedEvent = useMemo(() => events.find(e => e.id === selectedEventId), [events, selectedEventId]);
   const visibleEvents = useMemo(() => events.filter(e => !e.is_private || isMine(e.created_by)), [events, isMine]);
@@ -2377,6 +2436,121 @@ function App() {
                 </div>
               ))}
             </div>
+          </div>
+
+          <div className="card">
+            <div className="day-header" onClick={() => setMealsOpen(o => !o)}>
+              <div className="eyebrow" style={{marginBottom:0}}>Meal selections</div>
+              <span className="chevron">{mealsOpen ? '▾' : '▸'}</span>
+            </div>
+            {mealsOpen && (
+              <div style={{marginTop:10}}>
+                {tripDays.length === 0 && <div className="empty">No days yet.</div>}
+                {tripDays.map(day => {
+                  const mains = tripMenuItems.filter(i => i.trip_day_id === day.id && i.category === 'main');
+                  const puddings = tripMenuItems.filter(i => i.trip_day_id === day.id && i.category === 'pudding');
+                  const dayChoices = tripMealChoices.filter(c => c.trip_day_id === day.id);
+                  return (
+                    <div className="level-block" key={day.id}>
+                      <div className="walk-summary-date" style={{fontWeight:700, marginBottom:8}}>{fmtDate(day.day_date)}</div>
+
+                      <div className="eyebrow" style={{marginBottom:4}}>Mains</div>
+                      {mains.length === 0 && <div className="menu-item-row"><span className="menu-item-name" style={{fontStyle:'italic', color:'#8a9089'}}>No main options added yet</span></div>}
+                      {mains.map(item => (
+                        <div className="menu-item-row" key={item.id}>
+                          <span className="menu-item-name">{item.name}{item.price != null ? ` — £${item.price}` : ''}</span>
+                          <span style={{display:'flex', alignItems:'center'}}>
+                            <span className="menu-item-count">{dayChoices.filter(c => c.main_item_id === item.id).length}</span>
+                            {isTripOrganiser && <button className="menu-item-del" onClick={() => deleteMenuItem(item)}>✕</button>}
+                          </span>
+                        </div>
+                      ))}
+                      {isTripOrganiser && addingMenuItem && addingMenuItem.dayId === day.id && addingMenuItem.category === 'main' && (
+                        <div className="level-block">
+                          <div className="field">
+                            <label>Dish name</label>
+                            <input type="text" placeholder="e.g. Home-Baked Pie of the Day" value={menuItemForm.name} onChange={e => setMenuItemForm({ ...menuItemForm, name: e.target.value })} autoFocus />
+                          </div>
+                          <div className="field">
+                            <label>Price (optional)</label>
+                            <input type="text" inputMode="decimal" placeholder="e.g. 15.95" value={menuItemForm.price} onChange={e => setMenuItemForm({ ...menuItemForm, price: e.target.value })} />
+                          </div>
+                          <div className="btn-row">
+                            <button className="btn small" onClick={saveNewMenuItem}>Add main</button>
+                            <button className="btn small secondary" onClick={cancelNewMenuItem}>Cancel</button>
+                          </div>
+                        </div>
+                      )}
+                      {isTripOrganiser && !(addingMenuItem && addingMenuItem.dayId === day.id) && (
+                        <button className="btn small secondary" style={{marginTop:6}} onClick={() => openNewMenuItem(day.id, 'main')}>+ Add main</button>
+                      )}
+
+                      <div className="eyebrow" style={{marginTop:14, marginBottom:4}}>Puddings</div>
+                      {puddings.length === 0 && <div className="menu-item-row"><span className="menu-item-name" style={{fontStyle:'italic', color:'#8a9089'}}>No pudding options added yet</span></div>}
+                      {puddings.map(item => (
+                        <div className="menu-item-row" key={item.id}>
+                          <span className="menu-item-name">{item.name}{item.price != null ? ` — £${item.price}` : ''}</span>
+                          <span style={{display:'flex', alignItems:'center'}}>
+                            <span className="menu-item-count">{dayChoices.filter(c => c.pudding_item_id === item.id).length}</span>
+                            {isTripOrganiser && <button className="menu-item-del" onClick={() => deleteMenuItem(item)}>✕</button>}
+                          </span>
+                        </div>
+                      ))}
+                      {isTripOrganiser && addingMenuItem && addingMenuItem.dayId === day.id && addingMenuItem.category === 'pudding' && (
+                        <div className="level-block">
+                          <div className="field">
+                            <label>Dish name</label>
+                            <input type="text" placeholder="e.g. Sticky Toffee Pudding" value={menuItemForm.name} onChange={e => setMenuItemForm({ ...menuItemForm, name: e.target.value })} autoFocus />
+                          </div>
+                          <div className="field">
+                            <label>Price (optional)</label>
+                            <input type="text" inputMode="decimal" placeholder="e.g. 6.95" value={menuItemForm.price} onChange={e => setMenuItemForm({ ...menuItemForm, price: e.target.value })} />
+                          </div>
+                          <div className="btn-row">
+                            <button className="btn small" onClick={saveNewMenuItem}>Add pudding</button>
+                            <button className="btn small secondary" onClick={cancelNewMenuItem}>Cancel</button>
+                          </div>
+                        </div>
+                      )}
+                      {isTripOrganiser && !(addingMenuItem && addingMenuItem.dayId === day.id) && (
+                        <button className="btn small secondary" style={{marginTop:6}} onClick={() => openNewMenuItem(day.id, 'pudding')}>+ Add pudding</button>
+                      )}
+
+                      {isTripOrganiser && (mains.length > 0 || puddings.length > 0) && (
+                        <React.Fragment>
+                          <button className="btn small secondary" style={{marginTop:14}} onClick={() => toggleMealEditDay(day.id)}>
+                            {mealEditOpen[day.id] ? 'Hide choices editor' : 'Edit everyone\u2019s choices'}
+                          </button>
+                          {mealEditOpen[day.id] && (
+                            <div style={{marginTop:10}}>
+                              {goingMembers.length === 0 && <div className="empty">No one's marked as going yet.</div>}
+                              {goingMembers.map(m => {
+                                const choice = dayChoices.find(c => c.member_name === m.name);
+                                return (
+                                  <div className="member-row" key={m.id}>
+                                    <div className="member-name">{m.name}</div>
+                                    <div style={{display:'flex', gap:6, flex:'none', width:'56%'}}>
+                                      <select className="lift-select meal-select" value={(choice && choice.main_item_id) || ''} onChange={e => setMealChoice(day.id, m.name, 'main_item_id', e.target.value)}>
+                                        <option value="">— main —</option>
+                                        {mains.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
+                                      </select>
+                                      <select className="lift-select meal-select" value={(choice && choice.pudding_item_id) || ''} onChange={e => setMealChoice(day.id, m.name, 'pudding_item_id', e.target.value)}>
+                                        <option value="">— pudding —</option>
+                                        {puddings.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
+                                      </select>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </React.Fragment>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
           <div className="card">
