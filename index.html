@@ -755,10 +755,23 @@ function IdentityModal({ members, onPick }) {
   );
 }
 
+function surnameOf(fullName) {
+  const parts = (fullName || '').trim().split(/\s+/);
+  return parts.length > 1 ? parts[parts.length - 1] : (parts[0] || '');
+}
+
+function bySurname(a, b) {
+  const nameA = typeof a === 'string' ? a : (a && a.name) || '';
+  const nameB = typeof b === 'string' ? b : (b && b.name) || '';
+  const s = surnameOf(nameA).localeCompare(surnameOf(nameB), undefined, { sensitivity: 'base' });
+  return s !== 0 ? s : nameA.localeCompare(nameB, undefined, { sensitivity: 'base' });
+}
+
 function App() {
   const [loading, setLoading] = useState(true);
   const [members, setMembers] = useState([]);
-  const activeMembers = useMemo(() => members.filter(m => m.active !== false), [members]);
+  const activeMembers = useMemo(() => members.filter(m => m.active !== false).sort(bySurname), [members]);
+  const allMembersSorted = useMemo(() => [...members].sort(bySurname), [members]);
   const [events, setEvents] = useState([]);
   const [signups, setSignups] = useState([]);
   const [selectedEventId, setSelectedEventId] = useState(null);
@@ -3063,7 +3076,7 @@ function App() {
           </div>
           <p style={{fontSize:12, color:'#8a9089', margin:'0 0 10px'}}>Emails are stored but never shown or readable through the app — write-only, for future reminders.</p>
           {members.length === 0 && <div className="empty">No one on the list yet — add the group above.</div>}
-          {members.map(m => (
+          {allMembersSorted.map(m => (
             <div className="member-row" key={m.id}>
               {editingMemberId === m.id ? (
                 <React.Fragment>
