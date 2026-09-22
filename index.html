@@ -804,6 +804,7 @@ function App() {
 
   // --- Trips ---
   const [trips, setTrips] = useState([]);
+  const [tripsLoaded, setTripsLoaded] = useState(false);
   const [selectedTripId, setSelectedTripId] = useState(null);
   const [selectedLevelId, setSelectedLevelId] = useState(null);
   const [pendingLevelId, setPendingLevelId] = useState(null);
@@ -832,6 +833,7 @@ function App() {
   const toggleWhoDoing = (dayId) => setExpandedWhoDoing(prev => ({ ...prev, [dayId]: !prev[dayId] }));
   const toggleLevel = (levelId) => setExpandedLevels(prev => ({ ...prev, [levelId]: !prev[levelId] }));
   const floatingSectionRef = useRef(null);
+  const didDefaultLandingSelect = useRef(false);
 
   const pickIdentity = (name) => {
     localStorage.setItem('walkgroup_identity', name);
@@ -847,18 +849,9 @@ function App() {
       sb.from('walk_events').select('*').order('walk_date', { ascending: false }),
     ]);
     if (mRes.data) setMembers(mRes.data);
-    if (eRes.data) {
-      setEvents(eRes.data);
-      if (eRes.data.length && !selectedEventId) {
-        const visible = eRes.data.filter(e => !e.is_private || isMine(e.created_by));
-        const today = new Date().toISOString().slice(0, 10);
-        const upcoming = visible.filter(e => e.walk_date >= today).sort((a, b) => a.walk_date.localeCompare(b.walk_date));
-        if (upcoming.length) setSelectedEventId(upcoming[0].id);
-        else if (visible.length) setSelectedEventId(visible[0].id);
-      }
-    }
+    if (eRes.data) setEvents(eRes.data);
     setLoading(false);
-  }, [selectedEventId, isMine]);
+  }, []);
 
   useEffect(() => { loadAll(); loadTrips(); }, []);
 
@@ -880,6 +873,34 @@ function App() {
       else setShareScope('trip');
     }
   }, []);
+
+  // On first load (no deep-link in the URL), land on whichever is "now": a trip
+  // currently underway, else the soonest upcoming trip or walk, else — if
+  // nothing is upcoming — the most recent one that already happened.
+  useEffect(() => {
+    if (didDefaultLandingSelect.current) return;
+    if (loading || !tripsLoaded) return;
+    if (selectedEventId || selectedTripId) { didDefaultLandingSelect.current = true; return; }
+    didDefaultLandingSelect.current = true;
+
+    const today = new Date().toISOString().slice(0, 10);
+    const visibleWalks = events.filter(e => !e.is_private || isMine(e.created_by));
+    const visibleTrips = trips.filter(t => !t.is_private || isMine(t.created_by));
+    const tripEnd = (t) => t.end_date || t.start_date;
+
+    const activeTrip = visibleTrips.find(t => t.start_date <= today && tripEnd(t) >= today);
+    if (activeTrip) { setTab('trips'); setSelectedTripId(activeTrip.id); return; }
+
+    const nextTrip = visibleTrips.filter(t => t.start_date > today).sort((a, b) => a.start_date.localeCompare(b.start_date))[0];
+    const nextWalk = visibleWalks.filter(e => e.walk_date >= today).sort((a, b) => a.walk_date.localeCompare(b.walk_date))[0];
+    if (nextTrip && (!nextWalk || nextTrip.start_date <= nextWalk.walk_date)) { setTab('trips'); setSelectedTripId(nextTrip.id); return; }
+    if (nextWalk) { setTab('walk'); setSelectedEventId(nextWalk.id); return; }
+
+    const lastTrip = visibleTrips.filter(t => tripEnd(t) < today).sort((a, b) => tripEnd(b).localeCompare(tripEnd(a)))[0];
+    const lastWalk = visibleWalks.filter(e => e.walk_date < today).sort((a, b) => b.walk_date.localeCompare(a.walk_date))[0];
+    if (lastTrip && (!lastWalk || tripEnd(lastTrip) >= lastWalk.walk_date)) { setTab('trips'); setSelectedTripId(lastTrip.id); return; }
+    if (lastWalk) { setTab('walk'); setSelectedEventId(lastWalk.id); }
+  }, [loading, tripsLoaded, events, trips, selectedEventId, selectedTripId, isMine]);
 
   useEffect(() => {
     if (pendingLevelId && tripLevels.some(l => l.id === pendingLevelId)) {
@@ -931,6 +952,7 @@ function App() {
   const loadTrips = useCallback(async () => {
     const { data } = await sb.from('trips').select('*').order('start_date', { ascending: false });
     setTrips(data || []);
+    setTripsLoaded(true);
   }, []);
 
   const loadTripDetail = useCallback(async (tripId) => {
