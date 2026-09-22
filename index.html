@@ -20,6 +20,8 @@
 <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
 <script src="https://unpkg.com/@babel/standalone@7.24.7/babel.min.js"></script>
 <script src="https://unpkg.com/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="https://unpkg.com/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+<script src="https://unpkg.com/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.js"></script>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <style>
@@ -1537,6 +1539,69 @@ function App() {
     shareLink(url, 'Meal order — all nights', text);
   };
 
+  const exportMealPlanPdf = () => {
+    if (!selectedTrip) return;
+    if (!window.jspdf || !window.jspdf.jsPDF) { flashToast('PDF tool still loading — try again in a second'); return; }
+    const daysWithMenu = tripDays.filter(day => tripMenuItems.some(i => i.trip_day_id === day.id));
+    if (daysWithMenu.length === 0) { flashToast('No menu set up yet'); return; }
+    if (goingMembers.length === 0) { flashToast('No one marked as going yet'); return; }
+
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+    const margin = 24;
+
+    // Shrink font/row-height as the table grows, so it still fits one page.
+    const numCols = 1 + daysWithMenu.length * 2;
+    const numRows = goingMembers.length + 2;
+    const availWidth = pageWidth - margin * 2;
+    const availHeight = pageHeight - margin * 2 - 24; // minus title line
+    const fontSize = Math.max(5.5, Math.min(9, Math.floor((availHeight / numRows) * 1.7)));
+    const cellPad = fontSize < 7 ? 2 : 3;
+    const nameColWidth = Math.max(70, Math.min(120, availWidth * 0.16));
+
+    doc.setFontSize(13);
+    doc.setTextColor(31, 59, 44);
+    doc.text(`${selectedTrip.name} — Meal plan`, margin, margin);
+
+    const head = [
+      [{ content: 'Name', rowSpan: 2, styles: { valign: 'middle' } },
+        ...daysWithMenu.map(day => ({ content: fmtDate(day.day_date), colSpan: 2, styles: { halign: 'center' } }))],
+      daysWithMenu.flatMap(() => ['Main', 'Pudding']),
+    ];
+
+    const body = goingMembers.map(m => {
+      const row = [m.name];
+      daysWithMenu.forEach(day => {
+        const mains = tripMenuItems.filter(i => i.trip_day_id === day.id && i.category === 'main');
+        const puddings = tripMenuItems.filter(i => i.trip_day_id === day.id && i.category === 'pudding');
+        const choice = tripMealChoices.find(c => c.trip_day_id === day.id && c.member_name === m.name);
+        const mainItem = mains.find(i => i.id === (choice && choice.main_item_id));
+        const puddingItem = puddings.find(i => i.id === (choice && choice.pudding_item_id));
+        row.push(mainItem ? mainItem.name : '—', puddingItem ? puddingItem.name : '—');
+      });
+      return row;
+    });
+
+    const columnStyles = { 0: { cellWidth: nameColWidth, fontStyle: 'bold' } };
+
+    doc.autoTable({
+      head, body,
+      startY: margin + 12,
+      margin: { left: margin, right: margin },
+      theme: 'grid',
+      tableWidth: availWidth,
+      styles: { fontSize, cellPadding: cellPad, overflow: 'linebreak', lineColor: [218, 217, 206], lineWidth: 0.5 },
+      headStyles: { fillColor: [31, 59, 44], textColor: 255, fontSize, halign: 'center' },
+      alternateRowStyles: { fillColor: [247, 245, 239] },
+      columnStyles,
+      pageBreak: 'avoid',
+    });
+
+    doc.save(`${selectedTrip.name.replace(/[^a-z0-9]+/gi, '-')}-meal-plan.pdf`);
+  };
+
   const selectedEvent = useMemo(() => events.find(e => e.id === selectedEventId), [events, selectedEventId]);
   const visibleEvents = useMemo(() => events.filter(e => !e.is_private || isMine(e.created_by)), [events, isMine]);
   const canViewSelectedEvent = !selectedEvent || !selectedEvent.is_private || isMine(selectedEvent.created_by);
@@ -2533,8 +2598,13 @@ function App() {
             </div>
             {mealsOpen && (
               <div style={{marginTop:10}}>
-                {isTripOrganiser && tripDays.length > 1 && (
-                  <button className="btn small secondary" style={{marginBottom:16}} onClick={shareAllMealOrders}>📤 Share order — all nights</button>
+                {tripDays.some(day => tripMenuItems.some(i => i.trip_day_id === day.id)) && (
+                  <div className="btn-row" style={{marginBottom:16}}>
+                    {isTripOrganiser && tripDays.length > 1 && (
+                      <button className="btn small secondary" onClick={shareAllMealOrders}>📤 Share order — all nights</button>
+                    )}
+                    <button className="btn small secondary" onClick={exportMealPlanPdf}>📄 Export meal plan (PDF)</button>
+                  </div>
                 )}
                 {myName ? (
                   <div className="level-block" style={{background:'var(--sage-soft)', borderRadius:10, padding:12, marginBottom:16}}>
