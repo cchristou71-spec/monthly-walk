@@ -65,10 +65,10 @@
   .brand h1{font-size:22px; margin:0; font-weight:600; color:#fff;}
   .brand p{margin:2px 0 0; font-size:12.5px; color:var(--sage); font-weight:500;}
 
-  .tabs{display:flex; gap:6px; margin-top:14px;}
+  .tabs{display:flex; gap:5px; margin-top:14px; flex-wrap:wrap;}
   .tab{
-    flex:1; text-align:center; padding:8px 6px; border-radius:8px;
-    font-size:13px; font-weight:600; cursor:pointer; border:1px solid transparent;
+    flex:1 1 auto; min-width:64px; text-align:center; padding:8px 5px; border-radius:8px;
+    font-size:12.5px; font-weight:600; cursor:pointer; border:1px solid transparent;
     color:var(--paper); opacity:0.7; background:rgba(255,255,255,0.06);
     transition:all .15s ease;
   }
@@ -769,6 +769,85 @@ function bySurname(a, b) {
   return s !== 0 ? s : nameA.localeCompare(nameB, undefined, { sensitivity: 'base' });
 }
 
+function DelegateTab({ monthDelegations, activeMembers, events, MONTH_NAMES, delegationForYM, upsertDelegationOrganisers, upsertDelegationTitle }) {
+  const now = new Date();
+  const defaultYear = now.getMonth() >= 8 ? now.getFullYear() + 1 : now.getFullYear(); // Sep onward → default to next year
+  const yearsWithData = monthDelegations.map(d => d.year);
+  const yearOptions = Array.from(new Set([
+    now.getFullYear() - 1, now.getFullYear(), now.getFullYear() + 1, now.getFullYear() + 2, ...yearsWithData,
+  ])).sort((a, b) => a - b);
+  const [year, setYear] = useState(defaultYear);
+  const [titleDrafts, setTitleDrafts] = useState({});
+
+  const walksIn = (y, m) => events.filter(e => {
+    if (!e.walk_date) return false;
+    const [ey, em] = e.walk_date.split('-').map(Number);
+    return ey === y && em === m;
+  });
+
+  const draftKey = (m) => `${year}-${m}`;
+  const titleFor = (m, deleg) => (titleDrafts[draftKey(m)] !== undefined ? titleDrafts[draftKey(m)] : (deleg ? deleg.title || '' : ''));
+
+  const toggleOrganiser = (m, deleg, name) => {
+    const current = deleg ? (deleg.organisers || []) : [];
+    const next = current.includes(name) ? current.filter(n => n !== name) : [...current, name];
+    upsertDelegationOrganisers(year, m, next, null);
+  };
+
+  const saveTitle = (m) => {
+    const key = draftKey(m);
+    if (titleDrafts[key] === undefined) return;
+    upsertDelegationTitle(year, m, titleDrafts[key].trim() || null);
+    setTitleDrafts(prev => { const next = { ...prev }; delete next[key]; return next; });
+  };
+
+  return (
+    <div className="card">
+      <div className="row-between">
+        <div className="eyebrow">Delegate organisers</div>
+        <select style={{width:'auto'}} value={year} onChange={e => setYear(parseInt(e.target.value, 10))}>
+          {yearOptions.map(y => <option key={y} value={y}>{y}</option>)}
+        </select>
+      </div>
+      <p style={{fontSize:12.5, color:'#8a9089', margin:'0 0 14px'}}>
+        Set who's organising each month and, if you like, a default place name. New walks in that month pick these up automatically — organiser stays in sync everywhere; title is just a starting suggestion you can still change per walk.
+      </p>
+      {MONTH_NAMES.map((name, idx) => {
+        const m = idx + 1;
+        const deleg = delegationForYM(year, m);
+        const orgs = deleg ? (deleg.organisers || []) : [];
+        const walkCount = walksIn(year, m).length;
+        return (
+          <div key={m} style={{borderBottom:'1px solid var(--line)', padding:'14px 0'}}>
+            <div className="row-between" style={{marginBottom:8}}>
+              <h3 style={{margin:0, fontSize:15.5}}>{name} {year}</h3>
+              {walkCount > 0 && <span style={{fontSize:12, color:'#8a9089'}}>{walkCount} walk{walkCount > 1 ? 's' : ''}</span>}
+            </div>
+            <div className="field">
+              <label>Title (optional, e.g. Stratford)</label>
+              <input type="text" placeholder="e.g. Stratford" value={titleFor(m, deleg)}
+                onChange={e => setTitleDrafts(prev => ({ ...prev, [draftKey(m)]: e.target.value }))}
+                onBlur={() => saveTitle(m)} />
+            </div>
+            <div className="field" style={{marginBottom:0}}>
+              <label>Organiser</label>
+              <div className="organiser-list">
+                {activeMembers.length === 0 && <p style={{fontSize:13, color:'#8a9089', margin:'6px 0'}}>Add people from the Members tab first.</p>}
+                {activeMembers.map(mem => (
+                  <label key={mem.id} className="organiser-option">
+                    <input type="checkbox" checked={orgs.includes(mem.name)} onChange={() => toggleOrganiser(m, deleg, mem.name)} />
+                    {mem.name}
+                  </label>
+                ))}
+              </div>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function App() {
   const [loading, setLoading] = useState(true);
   const [members, setMembers] = useState([]);
@@ -776,8 +855,9 @@ function App() {
   const allMembersSorted = useMemo(() => [...members].sort(bySurname), [members]);
   const [events, setEvents] = useState([]);
   const [signups, setSignups] = useState([]);
+  const [monthDelegations, setMonthDelegations] = useState([]);
   const [selectedEventId, setSelectedEventId] = useState(null);
-  const [tab, setTab] = useState('walk'); // walk | history | members
+  const [tab, setTab] = useState('walk'); // walk | history | delegate | members
   const [search, setSearch] = useState('');
   const [showNewWalk, setShowNewWalk] = useState(false);
   const [editingWalk, setEditingWalk] = useState(false);
@@ -844,14 +924,94 @@ function App() {
   const flashToast = (msg) => { setToast(msg); setTimeout(() => setToast(''), 1800); };
 
   const loadAll = useCallback(async () => {
-    const [mRes, eRes] = await Promise.all([
+    const [mRes, eRes, dRes] = await Promise.all([
       sb.from('walk_members').select('id,name,active,created_at').order('name'),
       sb.from('walk_events').select('*').order('walk_date', { ascending: false }),
+      sb.from('month_delegations').select('*').order('year', { ascending: false }).order('month'),
     ]);
     if (mRes.data) setMembers(mRes.data);
     if (eRes.data) setEvents(eRes.data);
+    if (dRes.data) setMonthDelegations(dRes.data);
     setLoading(false);
   }, []);
+
+  // --- Monthly delegation helpers ---
+  // A "delegation" is one row per (year, month) holding that month's organiser(s)
+  // and a default/suggested title (e.g. "Stratford"). Walks link to it via
+  // month_delegation_id so the organiser stays in sync everywhere it's shown or
+  // edited; the title is only a starting suggestion — each walk keeps its own.
+  const ymOfDate = (dateStr) => {
+    if (!dateStr) return null;
+    const [y, m] = dateStr.split('-');
+    return { year: parseInt(y, 10), month: parseInt(m, 10) };
+  };
+  const delegationForYM = useCallback((year, month) => {
+    if (!year || !month) return null;
+    return monthDelegations.find(d => d.year === year && d.month === month) || null;
+  }, [monthDelegations]);
+  const delegationForEvent = useCallback((ev) => {
+    if (!ev) return null;
+    if (ev.month_delegation_id) {
+      const byId = monthDelegations.find(d => d.id === ev.month_delegation_id);
+      if (byId) return byId;
+    }
+    const ym = ymOfDate(ev.walk_date);
+    return ym ? delegationForYM(ym.year, ym.month) : null;
+  }, [monthDelegations, delegationForYM]);
+  const effectiveOrganisers = useCallback((ev) => {
+    if (!ev) return [];
+    const deleg = delegationForEvent(ev);
+    if (deleg) return deleg.organisers || [];
+    return ev.organisers || [];
+  }, [delegationForEvent]);
+  const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+
+  // Creates the (year, month) delegation row if it doesn't exist yet, or updates
+  // its organisers if it does. Returns the resulting row. Title is only set when
+  // creating a brand-new row (so editing organisers elsewhere never overwrites it).
+  const upsertDelegationOrganisers = async (year, month, organisers, titleIfNew) => {
+    const existing = delegationForYM(year, month);
+    if (existing) {
+      const { data, error } = await sb.from('month_delegations')
+        .update({ organisers, updated_at: new Date().toISOString() })
+        .eq('id', existing.id).select().single();
+      if (!error && data) {
+        setMonthDelegations(prev => prev.map(d => d.id === data.id ? data : d));
+        return data;
+      }
+      return existing;
+    }
+    const { data, error } = await sb.from('month_delegations')
+      .insert({ year, month, organisers, title: titleIfNew || null })
+      .select().single();
+    if (!error && data) {
+      setMonthDelegations(prev => [...prev, data]);
+      return data;
+    }
+    return null;
+  };
+
+  const upsertDelegationTitle = async (year, month, title) => {
+    const existing = delegationForYM(year, month);
+    if (existing) {
+      const { data, error } = await sb.from('month_delegations')
+        .update({ title, updated_at: new Date().toISOString() })
+        .eq('id', existing.id).select().single();
+      if (!error && data) {
+        setMonthDelegations(prev => prev.map(d => d.id === data.id ? data : d));
+        return data;
+      }
+      return existing;
+    }
+    const { data, error } = await sb.from('month_delegations')
+      .insert({ year, month, organisers: [], title })
+      .select().single();
+    if (!error && data) {
+      setMonthDelegations(prev => [...prev, data]);
+      return data;
+    }
+    return null;
+  };
 
   useEffect(() => { loadAll(); loadTrips(); }, []);
 
@@ -1632,9 +1792,9 @@ function App() {
 
   const isOrganiserOfSelected = useMemo(() => {
     if (!selectedEvent || !myName) return false;
-    const list = selectedEvent.organisers || [];
+    const list = effectiveOrganisers(selectedEvent);
     return list.some(o => o.trim().toLowerCase() === myName.trim().toLowerCase());
-  }, [selectedEvent, myName]);
+  }, [selectedEvent, myName, effectiveOrganisers]);
 
   const canEditRow = useCallback((memberName) => {
     return isOrganiserOfSelected;
@@ -1728,7 +1888,7 @@ function App() {
     if (!isOrganiserOfSelected) { flashToast("Only this walk's organiser can edit these details"); return; }
     setForm({
       walk_date: selectedEvent.walk_date, title: selectedEvent.title || '',
-      organisers: selectedEvent.organisers || [], details: selectedEvent.details || '',
+      organisers: effectiveOrganisers(selectedEvent), details: selectedEvent.details || '',
       start_lat: selectedEvent.start_lat ?? '', start_lng: selectedEvent.start_lng ?? '',
       end_lat: selectedEvent.end_lat ?? '', end_lng: selectedEvent.end_lng ?? '',
       lunch_name: selectedEvent.lunch_name || '', lunch_url: selectedEvent.lunch_url || '',
@@ -1738,6 +1898,20 @@ function App() {
     });
     setEditingWalk(true);
     setShowNewWalk(true);
+  };
+
+  // When the walk-form date is set (or changed), pull in that month's delegated
+  // organiser and — for a brand-new walk with no title typed yet — its suggested
+  // title too. Editing later still writes back to the same shared month record.
+  const onFormDateChange = (dateStr) => {
+    const ym = ymOfDate(dateStr);
+    const deleg = ym ? delegationForYM(ym.year, ym.month) : null;
+    setForm(f => ({
+      ...f,
+      walk_date: dateStr,
+      organisers: deleg ? deleg.organisers : f.organisers,
+      title: (!editingWalk && !f.title.trim() && deleg && deleg.title) ? deleg.title : f.title,
+    }));
   };
 
   const handleGpxFile = (e) => {
@@ -1781,8 +1955,11 @@ function App() {
     if (editingWalk && selectedEvent && !isOrganiserOfSelected) { flashToast("Only this walk's organiser can save changes"); return; }
     if (!editingWalk && !isRealIdentity) { flashToast('Pick who you are first'); return; }
     const organisers = form.organisers.includes(myName) ? form.organisers : [...form.organisers, myName];
+    const ym = ymOfDate(form.walk_date);
+    const deleg = ym ? await upsertDelegationOrganisers(ym.year, ym.month, organisers, form.title) : null;
     const payloadBase = {
       walk_date: form.walk_date, title: form.title, organisers, details: form.details,
+      month_delegation_id: deleg ? deleg.id : null,
       start_lat: num(form.start_lat), start_lng: num(form.start_lng),
       end_lat: num(form.end_lat), end_lng: num(form.end_lng),
       lunch_name: form.lunch_name, lunch_url: form.lunch_url,
@@ -1868,6 +2045,12 @@ function App() {
         organisers: Array.from(new Set((t.organisers || []).map(o => o === oldName ? newName : o))),
       }).eq('id', t.id)));
     }
+    const { data: delegationsWithOrg } = await sb.from('month_delegations').select('id,organisers').contains('organisers', [oldName]);
+    if (delegationsWithOrg && delegationsWithOrg.length) {
+      await Promise.all(delegationsWithOrg.map(d => sb.from('month_delegations').update({
+        organisers: Array.from(new Set((d.organisers || []).map(o => o === oldName ? newName : o))),
+      }).eq('id', d.id)));
+    }
   };
 
   const saveEditMember = async (m) => {
@@ -1909,6 +2092,7 @@ function App() {
               <div className={"tab" + (tab === 'walk' ? ' active' : '')} onClick={() => setTab('walk')}>This walk</div>
               <div className={"tab" + (tab === 'trips' ? ' active' : '')} onClick={() => setTab('trips')}>Trips</div>
               <div className={"tab" + (tab === 'history' ? ' active' : '')} onClick={() => setTab('history')}>All walks</div>
+              <div className={"tab" + (tab === 'delegate' ? ' active' : '')} onClick={() => setTab('delegate')}>Delegate</div>
               <div className={"tab" + (tab === 'members' ? ' active' : '')} onClick={() => setTab('members')}>Members</div>
             </div>
           )}
@@ -1963,8 +2147,8 @@ function App() {
                 </div>
                 <h2 className="walk-title">{selectedEvent.title || 'Group walk'}{selectedEvent.is_private ? ' 🔒' : ''}</h2>
                 <p className="walk-date">{fmtDate(selectedEvent.walk_date)}</p>
-                {selectedEvent.organisers && selectedEvent.organisers.length > 0 && (
-                  <p className="walk-meta">Organised by <b>{selectedEvent.organisers.join(', ')}</b></p>
+                {effectiveOrganisers(selectedEvent).length > 0 && (
+                  <p className="walk-meta">Organised by <b>{effectiveOrganisers(selectedEvent).join(', ')}</b></p>
                 )}
                 {selectedEvent.details && <p className="walk-details">{selectedEvent.details}</p>}
                 {selectedEvent.route_link && (
@@ -2164,7 +2348,7 @@ function App() {
               </div>
               <div className="field">
                 <label>Date</label>
-                <input type="date" value={form.walk_date} onChange={e => setForm({ ...form, walk_date: e.target.value })} />
+                <input type="date" value={form.walk_date} onChange={e => onFormDateChange(e.target.value)} />
               </div>
               <div className="field">
                 <label>Title (optional)</label>
@@ -2181,6 +2365,11 @@ function App() {
                     </label>
                   ))}
                 </div>
+                {form.walk_date && (
+                  <p style={{fontSize:12, color:'#8a9089', margin:'6px 0 0'}}>
+                    Shared with every walk in {(() => { const ym = ymOfDate(form.walk_date); return ym ? MONTH_NAMES[ym.month - 1] + ' ' + ym.year : 'this month'; })()} — change it here or on the Delegate tab, either updates the other.
+                  </p>
+                )}
               </div>
               <div className="field">
                 <label>Details</label>
@@ -3146,10 +3335,22 @@ function App() {
           {visibleEvents.map(e => (
             <div className="hist-item" key={e.id} onClick={() => { setSelectedEventId(e.id); setTab('walk'); }}>
               <h3>{fmtDateShort(e.walk_date)}{e.title ? ' — ' + e.title : ''}{e.is_private ? ' 🔒' : ''}</h3>
-              <p>{e.organisers && e.organisers.length > 0 ? 'Organised by ' + e.organisers.join(', ') : 'No organiser set'}</p>
+              <p>{effectiveOrganisers(e).length > 0 ? 'Organised by ' + effectiveOrganisers(e).join(', ') : 'No organiser set'}</p>
             </div>
           ))}
         </div>
+      )}
+
+      {tab === 'delegate' && (
+        <DelegateTab
+          monthDelegations={monthDelegations}
+          activeMembers={activeMembers}
+          events={events}
+          MONTH_NAMES={MONTH_NAMES}
+          delegationForYM={delegationForYM}
+          upsertDelegationOrganisers={upsertDelegationOrganisers}
+          upsertDelegationTitle={upsertDelegationTitle}
+        />
       )}
 
       {tab === 'members' && (
