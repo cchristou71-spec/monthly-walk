@@ -769,7 +769,7 @@ function bySurname(a, b) {
   return s !== 0 ? s : nameA.localeCompare(nameB, undefined, { sensitivity: 'base' });
 }
 
-function DelegateTab({ monthDelegations, activeMembers, events, MONTH_NAMES, delegationForYM, upsertDelegationOrganisers, upsertDelegationTitle }) {
+function DelegateTab({ monthDelegations, activeMembers, events, MONTH_NAMES, delegationForYM, upsertDelegationOrganisers, upsertDelegationTitle, onSelectWalk }) {
   const now = new Date();
   const defaultYear = now.getMonth() >= 8 ? now.getFullYear() + 1 : now.getFullYear(); // Sep onward → default to next year
   const yearsWithData = monthDelegations.map(d => d.year);
@@ -778,12 +778,14 @@ function DelegateTab({ monthDelegations, activeMembers, events, MONTH_NAMES, del
   ])).sort((a, b) => a - b);
   const [year, setYear] = useState(defaultYear);
   const [titleDrafts, setTitleDrafts] = useState({});
+  const [expanded, setExpanded] = useState({});
+  const toggleExpanded = (m) => setExpanded(prev => ({ ...prev, [m]: !prev[m] }));
 
   const walksIn = (y, m) => events.filter(e => {
     if (!e.walk_date) return false;
     const [ey, em] = e.walk_date.split('-').map(Number);
     return ey === y && em === m;
-  });
+  }).sort((a, b) => a.walk_date.localeCompare(b.walk_date));
 
   const draftKey = (m) => `${year}-${m}`;
   const titleFor = (m, deleg) => (titleDrafts[draftKey(m)] !== undefined ? titleDrafts[draftKey(m)] : (deleg ? deleg.title || '' : ''));
@@ -816,31 +818,48 @@ function DelegateTab({ monthDelegations, activeMembers, events, MONTH_NAMES, del
         const m = idx + 1;
         const deleg = delegationForYM(year, m);
         const orgs = deleg ? (deleg.organisers || []) : [];
-        const walkCount = walksIn(year, m).length;
+        const monthWalks = walksIn(year, m);
+        const isOpen = !!expanded[m];
         return (
-          <div key={m} style={{borderBottom:'1px solid var(--line)', padding:'14px 0'}}>
-            <div className="row-between" style={{marginBottom:8}}>
-              <h3 style={{margin:0, fontSize:15.5}}>{name} {year}</h3>
-              {walkCount > 0 && <span style={{fontSize:12, color:'#8a9089'}}>{walkCount} walk{walkCount > 1 ? 's' : ''}</span>}
+          <div key={m} style={{borderBottom:'1px solid var(--line)', padding:'12px 0'}}>
+            <div className="row-between" style={{cursor:'pointer'}} onClick={() => toggleExpanded(m)}>
+              <h3 style={{margin:0, fontSize:15.5}}>
+                {isOpen ? '▾' : '▸'} {name} {year}{deleg && deleg.title ? ' — ' + deleg.title : ''}
+              </h3>
+              {monthWalks.length > 0 && <span style={{fontSize:12, color:'#8a9089'}}>{monthWalks.length} walk{monthWalks.length > 1 ? 's' : ''}</span>}
             </div>
-            <div className="field">
-              <label>Title (optional, e.g. Stratford)</label>
-              <input type="text" placeholder="e.g. Stratford" value={titleFor(m, deleg)}
-                onChange={e => setTitleDrafts(prev => ({ ...prev, [draftKey(m)]: e.target.value }))}
-                onBlur={() => saveTitle(m)} />
-            </div>
-            <div className="field" style={{marginBottom:0}}>
-              <label>Organiser</label>
-              <div className="organiser-list">
-                {activeMembers.length === 0 && <p style={{fontSize:13, color:'#8a9089', margin:'6px 0'}}>Add people from the Members tab first.</p>}
-                {activeMembers.map(mem => (
-                  <label key={mem.id} className="organiser-option">
-                    <input type="checkbox" checked={orgs.includes(mem.name)} onChange={() => toggleOrganiser(m, deleg, mem.name)} />
-                    {mem.name}
-                  </label>
-                ))}
+            {isOpen && (
+              <div style={{marginTop:10}}>
+                {monthWalks.length > 0 && (
+                  <div style={{marginBottom:10}}>
+                    {monthWalks.map(w => (
+                      <div key={w.id} className="hist-item" style={{padding:'8px 10px'}}
+                        onClick={() => onSelectWalk(w.id)}>
+                        {fmtDateShort(w.walk_date)}{w.title ? ' — ' + w.title : ''}{w.is_private ? ' 🔒' : ''}
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <div className="field">
+                  <label>Title (optional, e.g. Stratford)</label>
+                  <input type="text" placeholder="e.g. Stratford" value={titleFor(m, deleg)}
+                    onChange={e => setTitleDrafts(prev => ({ ...prev, [draftKey(m)]: e.target.value }))}
+                    onBlur={() => saveTitle(m)} />
+                </div>
+                <div className="field" style={{marginBottom:0}}>
+                  <label>Organiser</label>
+                  <div className="organiser-list">
+                    {activeMembers.length === 0 && <p style={{fontSize:13, color:'#8a9089', margin:'6px 0'}}>Add people from the Members tab first.</p>}
+                    {activeMembers.map(mem => (
+                      <label key={mem.id} className="organiser-option">
+                        <input type="checkbox" checked={orgs.includes(mem.name)} onChange={() => toggleOrganiser(m, deleg, mem.name)} />
+                        {mem.name}
+                      </label>
+                    ))}
+                  </div>
+                </div>
               </div>
-            </div>
+            )}
           </div>
         );
       })}
@@ -3350,6 +3369,7 @@ function App() {
           delegationForYM={delegationForYM}
           upsertDelegationOrganisers={upsertDelegationOrganisers}
           upsertDelegationTitle={upsertDelegationTitle}
+          onSelectWalk={(id) => { setSelectedEventId(id); setTab('walk'); }}
         />
       )}
 
