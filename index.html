@@ -796,11 +796,10 @@ function surnameOf(fullName) {
   return parts.length > 1 ? parts[parts.length - 1] : (parts[0] || '');
 }
 
-function bySurname(a, b) {
+function byFirstName(a, b) {
   const nameA = typeof a === 'string' ? a : (a && a.name) || '';
   const nameB = typeof b === 'string' ? b : (b && b.name) || '';
-  const s = surnameOf(nameA).localeCompare(surnameOf(nameB), undefined, { sensitivity: 'base' });
-  return s !== 0 ? s : nameA.localeCompare(nameB, undefined, { sensitivity: 'base' });
+  return nameA.trim().localeCompare(nameB.trim(), undefined, { sensitivity: 'base' });
 }
 
 function MonthlyScheduleTab({ monthDelegations, activeMembers, events, myPrivateEvents, MONTH_NAMES, delegationForYM, upsertDelegationOrganisers, upsertDelegationTitle, onSelectWalk }) {
@@ -917,8 +916,8 @@ function MonthlyScheduleTab({ monthDelegations, activeMembers, events, myPrivate
 function App() {
   const [loading, setLoading] = useState(true);
   const [members, setMembers] = useState([]);
-  const activeMembers = useMemo(() => members.filter(m => m.active !== false).sort(bySurname), [members]);
-  const allMembersSorted = useMemo(() => [...members].sort(bySurname), [members]);
+  const activeMembers = useMemo(() => members.filter(m => m.active !== false).sort(byFirstName), [members]);
+  const allMembersSorted = useMemo(() => [...members].sort(byFirstName), [members]);
   const [events, setEvents] = useState([]);
   const [signups, setSignups] = useState([]);
   const [monthDelegations, setMonthDelegations] = useState([]);
@@ -2666,7 +2665,7 @@ function App() {
           {visibleTrips.map(t => (
             <div className="hist-item" key={t.id} onClick={() => setSelectedTripId(t.id)}>
               <h3>{t.name}{t.is_private ? ' 🔒' : ''}</h3>
-              <p>{fmtDateShort(t.start_date)} – {fmtDateShort(t.end_date)}{t.organisers && t.organisers.length > 0 ? ' · Organised by ' + t.organisers.join(', ') : ''}</p>
+              <p>{fmtDateShort(t.start_date)} – {fmtDateShort(t.end_date)}{t.organisers && t.organisers.length > 0 ? ' · Organised by ' + [...t.organisers].sort(byFirstName).join(', ') : ''}</p>
             </div>
           ))}
         </div>
@@ -2808,7 +2807,7 @@ function App() {
             <h2 className="walk-title">{selectedTrip.name}{selectedTrip.is_private ? ' 🔒' : ''}</h2>
             <p className="walk-date">{fmtDateShort(selectedTrip.start_date)} – {fmtDateShort(selectedTrip.end_date)}</p>
             {selectedTrip.organisers && selectedTrip.organisers.length > 0 && (
-              <p className="walk-meta">Organised by <b>{selectedTrip.organisers.join(', ')}</b></p>
+              <p className="walk-meta">Organised by <b>{[...selectedTrip.organisers].sort(byFirstName).join(', ')}</b></p>
             )}
             {selectedTrip.details && <p className="walk-details">{selectedTrip.details}</p>}
           </div>
