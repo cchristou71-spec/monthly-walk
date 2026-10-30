@@ -306,6 +306,40 @@
   .going-summary-passenger{font-size:13.5px; color:#3a4a3f; padding-left:22px; line-height:1.7;}
   .going-summary-passenger.muted{color:#8a9089; font-style:italic;}
 
+  .toggle.on.maybe{background:#C58A1B; border-color:#C58A1B;}
+  .toggle.on.declined{background:#B5483A; border-color:#B5483A;}
+  .room-pick{display:flex; gap:6px; flex-wrap:wrap; width:100%; padding-top:2px;}
+  .room-pill{
+    border:1px solid var(--line); background:#fff; border-radius:999px; padding:6px 11px;
+    font-size:12.5px; font-weight:600; color:#5b6960; cursor:pointer; font-family:inherit;
+  }
+  .room-pill.on{background:var(--forest); border-color:var(--forest); color:#fff;}
+  .room-pill.full{border-color:#B5483A; color:#B5483A;}
+  .room-pill.on.full{background:#B5483A; color:#fff;}
+  .room-pill.locked{cursor:not-allowed; opacity:0.5;}
+  .att-counts{display:flex; gap:6px; flex-wrap:wrap; margin-bottom:12px;}
+  .att-chip{font-size:12.5px; font-weight:700; padding:5px 10px; border-radius:999px; background:var(--sage-soft); color:var(--forest);}
+  .att-chip.maybe{background:#FBF0D9; color:#8A5F0A;}
+  .att-chip.none{background:#EEF0EC; color:#5b6960;}
+  .att-chip.declined{background:#F7E3DF; color:#9B3A2D;}
+  .att-heading{font-size:12px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; color:#5b6960; margin:14px 0 4px;}
+  .att-row{display:flex; justify-content:space-between; gap:10px; font-size:13.5px; color:#3a4a3f; padding:3px 0;}
+  .att-room{font-weight:600; color:var(--forest); text-align:right;}
+  .att-room.none{color:#B5483A; font-weight:500; font-style:italic;}
+  .att-names{font-size:13.5px; color:#3a4a3f; line-height:1.7;}
+  .room-grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(78px,1fr)); gap:6px; margin-bottom:6px;}
+  .room-edit-row{display:flex; gap:8px; align-items:center; margin-bottom:8px;}
+  .room-edit-row input[type=text]{flex:1; min-width:0;}
+  .room-edit-row input[type=number]{width:72px; flex:none;}
+  .room-remove{flex:none; width:34px; height:34px; border-radius:8px; border:1px solid var(--line); background:#fff; color:#B5483A; font-size:16px; cursor:pointer;}
+  .room-cell{border:1px solid var(--line); border-radius:10px; padding:8px 4px; text-align:center; background:#fff;}
+  .room-cell.over{border-color:#B5483A; background:#F7E3DF;}
+  .room-cell-name{font-size:11.5px; font-weight:700; color:#5b6960;}
+  .room-cell-num{font-size:17px; font-weight:800; color:var(--forest); margin:2px 0;}
+  .room-cell.over .room-cell-num{color:#9B3A2D;}
+  .room-cell-sub{font-size:11.5px; color:#5b6960;}
+  .room-warning{background:#F7E3DF; color:#9B3A2D; border-radius:10px; padding:9px 12px; font-size:13px; font-weight:600; margin-bottom:10px; line-height:1.5;}
+
   .menu-item-row{display:flex; align-items:center; justify-content:space-between; gap:8px; padding:4px 0;}
   .menu-item-name{font-size:13.5px; color:#3a4a3f;}
   .menu-item-count{font-size:12.5px; font-weight:700; color:var(--forest); flex:none;}
@@ -903,6 +937,13 @@ function App() {
   const [newMemberName, setNewMemberName] = useState('');
   const [liftSortMode, setLiftSortMode] = useState('name');
   const [whosInOpen, setWhosInOpen] = useState(true);
+  // Room types are set per trip (the hotel changes each year): [{ key, label, count }]
+  const normaliseRooms = (inv) => {
+    if (!inv) return [];
+    if (Array.isArray(inv)) return inv.filter(r => r && r.label).map(r => ({ key: r.key, label: r.label, count: parseInt(r.count, 10) || 0 }));
+    const names = { single: 'Single', twin: 'Twin', double: 'Double', superior: 'Superior/Queen' };
+    return Object.keys(inv).map(k => ({ key: k, label: names[k] || k, count: parseInt(inv[k], 10) || 0 }));
+  };
   const [tripGoingOpen, setTripGoingOpen] = useState(false);
   const [tripDocsOpen, setTripDocsOpen] = useState({});
   const toggleTripDocsOpen = (key) => setTripDocsOpen(prev => ({ ...prev, [key]: !prev[key] }));
@@ -936,7 +977,7 @@ function App() {
   const [menuItemForm, setMenuItemForm] = useState({ name: '', price: '' });
   const [showTripForm, setShowTripForm] = useState(false);
   const [editingTrip, setEditingTrip] = useState(false);
-  const [tripForm, setTripForm] = useState({ name: '', start_date: '', end_date: '', organisers: [], details: '', floating_group_label: '', report_text: '', is_private: false });
+  const [tripForm, setTripForm] = useState({ name: '', start_date: '', end_date: '', organisers: [], details: '', floating_group_label: '', report_text: '', is_private: false, room_inventory: [], hotel_name: '' });
   const [editingLevelId, setEditingLevelId] = useState(null);
   const [addingWalkDayId, setAddingWalkDayId] = useState(null);
   const [levelForm, setLevelForm] = useState({ title: '', level: 'Easy', walk_type: 'Main Walk', route_number: '', details: '', distance_miles: '', ascent_feet: '', est_time_min: '', est_time_max: '', start_lat: '', start_lng: '', end_lat: '', end_lng: '', gpx_content: '', gpx_filename: '', route_link: '' });
@@ -1220,6 +1261,39 @@ function App() {
     return activeMembers.filter(m => { const a = attendeeFor(m.name); return a && a.going; });
   }, [activeMembers, tripAttendees]);
 
+  const ROOM_TYPES = useMemo(() => normaliseRooms(selectedTrip && selectedTrip.room_inventory), [selectedTrip]);
+  const roomInventory = useMemo(() => (ROOM_TYPES.length ? Object.fromEntries(ROOM_TYPES.map(r => [r.key, r.count])) : null), [ROOM_TYPES]);
+
+  const attendanceGroups = useMemo(() => {
+    const g = { going: [], maybe: [], none: [], declined: [] };
+    activeMembers.forEach(m => {
+      const a = attendeeFor(m.name);
+      const st = a ? (a.status || (a.going ? 'going' : null)) : null;
+      g[st || 'none'].push(m);
+    });
+    return g;
+  }, [activeMembers, tripAttendees]);
+
+  const roomStats = useMemo(() => {
+    const stats = {};
+    ROOM_TYPES.forEach(r => { stats[r.key] = { used: 0, total: roomInventory ? (roomInventory[r.key] || 0) : 0 }; });
+    goingMembers.forEach(m => { const a = attendeeFor(m.name); if (a && a.room_type && stats[a.room_type]) stats[a.room_type].used++; });
+    return stats;
+  }, [goingMembers, tripAttendees, roomInventory]);
+
+  const roomWarnings = useMemo(() => {
+    if (!roomInventory) return [];
+    const w = [];
+    let totalRooms = 0;
+    ROOM_TYPES.forEach(r => {
+      const s = roomStats[r.key];
+      totalRooms += s.total;
+      if (s.used > s.total) w.push(`${s.used} ${r.label} assigned but only ${s.total} available`);
+    });
+    if (goingMembers.length > totalRooms) w.push(`${goingMembers.length} going but only ${totalRooms} rooms in total`);
+    return w;
+  }, [roomInventory, roomStats, goingMembers]);
+
   const isTripOrganiser = useMemo(() => {
     if (!selectedTrip || !myName) return false;
     return (selectedTrip.organisers || []).some(o => o.trim().toLowerCase() === myName.trim().toLowerCase());
@@ -1300,6 +1374,44 @@ function App() {
     await sb.from('trip_attendees').upsert(payload, { onConflict: 'trip_id,member_name' });
   };
 
+  const attendeeStatusOf = (a) => (a ? (a.status || (a.going ? 'going' : null)) : null);
+
+  const setAttendStatus = async (memberName, status) => {
+    if (!canEditTripPerson(memberName)) { flashToast(myName ? `Only this trip's organiser can update that` : 'Pick who you are first'); return; }
+    const existing = attendeeFor(memberName);
+    const current = attendeeStatusOf(existing);
+    const next = current === status ? null : status;
+    const payload = {
+      trip_id: selectedTripId, member_name: memberName, status: next, going: next === 'going',
+      room_type: next === 'going' ? ((existing && existing.room_type) || null) : null,
+      updated_at: new Date().toISOString(),
+    };
+    setTripAttendees(prev => [...prev.filter(a => a.member_name !== memberName), { ...(existing || {}), ...payload }]);
+    const { error } = await sb.from('trip_attendees').upsert(payload, { onConflict: 'trip_id,member_name' });
+    if (error) {
+      // Database not updated yet: fall back to the old going flag so nothing is lost.
+      await sb.from('trip_attendees').upsert({ trip_id: selectedTripId, member_name: memberName, going: next === 'going', updated_at: payload.updated_at }, { onConflict: 'trip_id,member_name' });
+      flashToast('Saved as going only — database update needed for Maybe / Declined');
+    }
+  };
+
+  const setRoomType = async (memberName, roomKey) => {
+    if (!canEditTripPerson(memberName)) { flashToast(myName ? `Only this trip's organiser can update that` : 'Pick who you are first'); return; }
+    const existing = attendeeFor(memberName);
+    if (!existing || attendeeStatusOf(existing) !== 'going') { flashToast('Mark them as going first'); return; }
+    const next = existing.room_type === roomKey ? null : roomKey;
+    if (next && roomInventory) {
+      const total = roomInventory[next] || 0;
+      const usedByOthers = goingMembers.filter(m => m.name !== memberName && (attendeeFor(m.name) || {}).room_type === next).length;
+      const label = (ROOM_TYPES.find(r => r.key === next) || {}).label;
+      if (usedByOthers + 1 > total) flashToast(`Only ${total} ${label} room${total === 1 ? '' : 's'} — that would make ${usedByOthers + 1}`);
+    }
+    const payload = { trip_id: selectedTripId, member_name: memberName, room_type: next, updated_at: new Date().toISOString() };
+    setTripAttendees(prev => [...prev.filter(a => a.member_name !== memberName), { ...existing, ...payload }]);
+    const { error } = await sb.from('trip_attendees').upsert(payload, { onConflict: 'trip_id,member_name' });
+    if (error) flashToast('Room not saved — database update needed first');
+  };
+
   const setDriving = async (memberName, value) => {
     if (!canEditTripPerson(memberName)) { flashToast(myName ? `Only this trip's organiser can update that` : 'Pick who you are first'); return; }
     const payload = { trip_id: selectedTripId, member_name: memberName, driving: value, updated_at: new Date().toISOString() };
@@ -1347,7 +1459,10 @@ function App() {
   const openNewTripForm = () => {
     if (!isRealIdentity) { flashToast(myName === 'Visitor' ? "Visitors can't create trips — pick your name instead" : 'Pick who you are first'); return; }
     setSelectedTripId(null);
-    setTripForm({ name: '', start_date: '', end_date: '', organisers: [myName], details: '', floating_group_label: '', report_text: '', is_private: false });
+    const prevTrip = [...trips].sort((a, b) => (b.start_date || '').localeCompare(a.start_date || '')).find(t => normaliseRooms(t.room_inventory).length > 0);
+    setTripForm({ name: '', start_date: '', end_date: '', organisers: [myName], details: '', floating_group_label: '', report_text: '', is_private: false,
+      room_inventory: prevTrip ? normaliseRooms(prevTrip.room_inventory).map(r => ({ ...r, count: String(r.count) })) : [],
+      hotel_name: '', rooms_copied_from: prevTrip ? prevTrip.name : '' });
     setEditingTrip(false);
     setShowTripForm(true);
   };
@@ -1361,6 +1476,8 @@ function App() {
       floating_group_label: selectedTrip.floating_group_label || '',
       report_text: selectedTrip.report_text || '',
       is_private: selectedTrip.is_private || false,
+      room_inventory: normaliseRooms(selectedTrip.room_inventory).map(r => ({ ...r, count: String(r.count) })),
+      hotel_name: selectedTrip.hotel_name || '',
     });
     setEditingTrip(true);
     setShowTripForm(true);
@@ -1380,6 +1497,30 @@ function App() {
     while (d <= end) { out.push(d.toISOString().slice(0, 10)); d.setUTCDate(d.getUTCDate() + 1); }
     return out;
   };
+
+  const saveRoomInventory = async (tripId) => {
+    const used = new Set();
+    const rows = (tripForm.room_inventory || []).filter(r => (r.label || '').trim());
+    const inv = rows.map(r => {
+      let key = r.key;
+      if (!key) {
+        const base = r.label.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'room';
+        key = base; let n = 2;
+        while (used.has(key) || rows.some(x => x !== r && x.key === key)) { key = base + '-' + n++; }
+      }
+      used.add(key);
+      return { key, label: r.label.trim(), count: parseInt(r.count, 10) || 0 };
+    });
+    const hotel = (tripForm.hotel_name || '').trim();
+    const hadBefore = !!(selectedTrip && (selectedTrip.room_inventory || selectedTrip.hotel_name));
+    if (!inv.length && !hotel && !hadBefore) return;
+    const { error } = await sb.from('trips').update({ room_inventory: inv.length ? inv : null, hotel_name: hotel || null }).eq('id', tripId);
+    if (error) flashToast('Hotel / room details not saved — database update needed first');
+  };
+
+  const updateRoomRow = (i, patch) => setTripForm(f => ({ ...f, room_inventory: f.room_inventory.map((r, j) => j === i ? { ...r, ...patch } : r) }));
+  const removeRoomRow = (i) => setTripForm(f => ({ ...f, room_inventory: f.room_inventory.filter((_, j) => j !== i) }));
+  const addRoomRow = () => setTripForm(f => ({ ...f, room_inventory: [...(f.room_inventory || []), { key: '', label: '', count: '' }] }));
 
   const saveTripForm = async () => {
     if (!tripForm.name.trim()) { flashToast('Give the trip a name'); return; }
@@ -1414,6 +1555,7 @@ function App() {
           await sb.from('trip_signups').delete().eq('trip_day_id', day.id);
           await sb.from('trip_days').delete().eq('id', day.id);
         }
+        await saveRoomInventory(selectedTrip.id);
         flashToast('Trip updated');
       }
       setShowTripForm(false);
@@ -1435,6 +1577,7 @@ function App() {
 
     const dates = dateRange(tripForm.start_date, tripForm.end_date);
     await sb.from('trip_days').insert(dates.map(d => ({ trip_id: trip.id, day_date: d })));
+    await saveRoomInventory(trip.id);
     setShowTripForm(false);
     setSelectedTripId(trip.id);
     flashToast('Trip created');
@@ -2569,6 +2712,25 @@ function App() {
             <input type="text" placeholder="e.g. Wednesday and Thursday" value={tripForm.floating_group_label} onChange={e => setTripForm({ ...tripForm, floating_group_label: e.target.value })} />
             <p style={{fontSize:12, color:'#8a9089', margin:'6px 0 0'}}>Used as the heading for alternative routes and non-walking options that aren't tied to a specific day. Leave blank for the default heading.</p>
           </div>
+          <div className="field">
+            <label>Hotel (optional)</label>
+            <input type="text" placeholder="e.g. Skelwith Bridge Hotel" value={tripForm.hotel_name || ''} onChange={e => setTripForm({ ...tripForm, hotel_name: e.target.value })} />
+          </div>
+          <div className="field">
+            <label>Room types at this hotel (optional)</label>
+            {!editingTrip && tripForm.rooms_copied_from && tripForm.room_inventory.length > 0 && (
+              <p style={{fontSize:12, color:'#8a9089', margin:'0 0 8px'}}>Copied from {tripForm.rooms_copied_from} — change them to match this hotel.</p>
+            )}
+            {(tripForm.room_inventory || []).map((r, i) => (
+              <div className="room-edit-row" key={i}>
+                <input type="text" placeholder="Room type, e.g. Twin" value={r.label} onChange={e => updateRoomRow(i, { label: e.target.value })} />
+                <input type="number" min="0" inputMode="numeric" placeholder="How many" value={r.count} onChange={e => updateRoomRow(i, { count: e.target.value })} />
+                <button type="button" className="room-remove" onClick={() => removeRoomRow(i)} title="Remove">✕</button>
+              </div>
+            ))}
+            <button type="button" className="btn small secondary" onClick={addRoomRow}>+ Add room type</button>
+            <p style={{fontSize:12, color:'#8a9089', margin:'6px 0 0'}}>Type of room and how many the hotel has. Used to show what's left and warn if too many are assigned.</p>
+          </div>
           {editingTrip && selectedTrip && (
             <div className="field">
               <DocumentsSection
@@ -3024,6 +3186,53 @@ function App() {
           </div>
 
           <div className="card">
+            <div className="eyebrow" style={{marginBottom:8}}>Attendance &amp; rooms</div>
+            {selectedTrip.hotel_name && <p style={{fontSize:13.5, fontWeight:600, color:'var(--forest)', margin:'0 0 10px'}}>🏨 {selectedTrip.hotel_name}</p>}
+            <div className="att-counts">
+              <span className="att-chip">✓ Going {attendanceGroups.going.length}</span>
+              <span className="att-chip maybe">? Maybe {attendanceGroups.maybe.length}</span>
+              <span className="att-chip none">Not responded {attendanceGroups.none.length}</span>
+              <span className="att-chip declined">✗ Declined {attendanceGroups.declined.length}</span>
+            </div>
+            {roomWarnings.length > 0 && (
+              <div className="room-warning">{roomWarnings.map((w, i) => <div key={i}>⚠ {w}</div>)}</div>
+            )}
+            {roomInventory ? (
+              <div className="room-grid">
+                {ROOM_TYPES.map(r => {
+                  const s = roomStats[r.key];
+                  const left = s.total - s.used;
+                  return (
+                    <div className={"room-cell" + (left < 0 ? ' over' : '')} key={r.key}>
+                      <div className="room-cell-name">{r.label}</div>
+                      <div className="room-cell-num">{s.used}/{s.total}</div>
+                      <div className="room-cell-sub">{left >= 0 ? `${left} left` : `${-left} over`}</div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (isTripOrganiser && <p style={{fontSize:12.5, color:'#8a9089', margin:'0 0 6px'}}>Add room numbers under Edit trip to see availability.</p>)}
+
+            <div className="att-heading">Going ({attendanceGroups.going.length})</div>
+            {attendanceGroups.going.length === 0 ? <div className="empty">No one yet.</div> : attendanceGroups.going.map(m => {
+              const a = attendeeFor(m.name);
+              const rt = a && a.room_type ? ROOM_TYPES.find(r => r.key === a.room_type) : null;
+              return (
+                <div className="att-row" key={m.id}>
+                  <span>{m.name}</span>
+                  <span className={"att-room" + (rt ? '' : ' none')}>{rt ? rt.label : 'No room type'}</span>
+                </div>
+              );
+            })}
+            <div className="att-heading">Maybe ({attendanceGroups.maybe.length})</div>
+            <div className="att-names">{attendanceGroups.maybe.length ? attendanceGroups.maybe.map(m => m.name).join(', ') : '—'}</div>
+            <div className="att-heading">Not responded ({attendanceGroups.none.length})</div>
+            <div className="att-names">{attendanceGroups.none.length ? attendanceGroups.none.map(m => m.name).join(', ') : '—'}</div>
+            <div className="att-heading">Declined ({attendanceGroups.declined.length})</div>
+            <div className="att-names">{attendanceGroups.declined.length ? attendanceGroups.declined.map(m => m.name).join(', ') : '—'}</div>
+          </div>
+
+          <div className="card">
             <div className="eyebrow" style={{marginBottom:8}}>Who's going &amp; driving</div>
             {(() => {
               if (goingMembers.length === 0) return <div className="empty">No one's marked as going yet.</div>;
@@ -3064,24 +3273,47 @@ function App() {
                 <input className="search" type="text" placeholder="Find your name…" value={search} onChange={e => setSearch(e.target.value)} style={{marginTop:10}} />
                 <div className="legend">
                   <span>✓ Going</span>
+                  <span>? Maybe</span>
+                  <span>✗ Declined</span>
                   <span>🚗 Driving to/from hotel</span>
                   <span>+ = can give a lift</span>
                 </div>
                 {filteredMembers.map(m => {
                   const a = attendeeFor(m.name);
                   const d = driverFor(m.name);
+                  const st = attendeeStatusOf(a);
                   const editable = canEditTripPerson(m.name);
                   return (
-                    <div className={"member-row" + (editable ? '' : ' locked')} key={m.id}>
+                    <div className={"member-row" + (editable ? '' : ' locked')} key={m.id} style={{flexWrap:'wrap'}}>
                       <div className="member-name">{m.name}{!editable && ' 🔒'}</div>
                       <div className="toggle-group">
-                        <div className={"toggle" + (a && a.going ? ' on' : '') + (editable ? '' : ' locked')}
-                          onClick={() => setGoing(m.name, !(a && a.going))} title="Going">✓</div>
+                        <div className={"toggle" + (st === 'going' ? ' on' : '') + (editable ? '' : ' locked')}
+                          onClick={() => setAttendStatus(m.name, 'going')} title="Going">✓</div>
+                        <div className={"toggle" + (st === 'maybe' ? ' on maybe' : '') + (editable ? '' : ' locked')}
+                          onClick={() => setAttendStatus(m.name, 'maybe')} title="Maybe">?</div>
+                        <div className={"toggle" + (st === 'declined' ? ' on declined' : '') + (editable ? '' : ' locked')}
+                          onClick={() => setAttendStatus(m.name, 'declined')} title="Declined">✗</div>
                         <div className={"toggle" + (d && d.driving ? ' on' : '') + (editable ? '' : ' locked')}
                           onClick={() => setDriving(m.name, !(d && d.driving))} title="Driving">🚗</div>
                         <div className={"toggle" + (d && d.driving && d.can_give_lift !== false ? ' on lift' : '') + (editable ? '' : ' locked') + (d && d.driving ? '' : ' invisible')}
                           onClick={() => setTripCanGiveLift(m.name, !(d.can_give_lift !== false))} title="Can give a lift">+</div>
                       </div>
+                      {st === 'going' && (
+                        <div className="room-pick">
+                          {ROOM_TYPES.map(r => {
+                            const stat = roomStats[r.key];
+                            const mine = a && a.room_type === r.key;
+                            const full = !!roomInventory && (mine ? stat.used > stat.total : stat.used >= stat.total);
+                            return (
+                              <button key={r.key} type="button"
+                                className={"room-pill" + (mine ? ' on' : '') + (full ? ' full' : '') + (editable ? '' : ' locked')}
+                                onClick={() => setRoomType(m.name, r.key)}>
+                                {r.label}{roomInventory ? ` · ${Math.max(stat.total - stat.used, 0)} left` : ''}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
                     </div>
                   );
                 })}
