@@ -944,6 +944,7 @@ function App() {
     return Object.keys(inv).map(k => ({ key: k, label: names[k] || k, count: parseInt(inv[k], 10) || 0 }));
   };
   const [tripGoingOpen, setTripGoingOpen] = useState(false);
+  const [tripGoingOnly, setTripGoingOnly] = useState(false);
   const [tripDocsOpen, setTripDocsOpen] = useState({});
   const toggleTripDocsOpen = (key) => setTripDocsOpen(prev => ({ ...prev, [key]: !prev[key] }));
   const [tripLiftOpen, setTripLiftOpen] = useState(false);
@@ -3270,6 +3271,10 @@ function App() {
             {tripGoingOpen && (
               <React.Fragment>
                 <input className="search" type="text" placeholder="Find your name…" value={search} onChange={e => setSearch(e.target.value)} style={{marginTop:10}} />
+                <label style={{display:'flex', alignItems:'center', gap:8, fontSize:13.5, fontWeight:600, color:'#3a4a3f', margin:'2px 0 12px', cursor:'pointer'}}>
+                  <input type="checkbox" checked={tripGoingOnly} onChange={e => setTripGoingOnly(e.target.checked)} />
+                  Only show people who are going
+                </label>
                 <div className="legend">
                   <span>✓ Going</span>
                   <span>? Maybe</span>
@@ -3277,7 +3282,7 @@ function App() {
                   <span>🚗 Driving to/from hotel</span>
                   <span>+ = can give a lift</span>
                 </div>
-                {filteredMembers.map(m => {
+                {filteredMembers.filter(m => !tripGoingOnly || attendeeStatusOf(attendeeFor(m.name)) === 'going').map(m => {
                   const a = attendeeFor(m.name);
                   const d = driverFor(m.name);
                   const st = attendeeStatusOf(a);
