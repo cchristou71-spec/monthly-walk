@@ -857,7 +857,13 @@ function MonthlyScheduleTab({ monthDelegations, activeMembers, events, myPrivate
           <div key={m} style={{borderBottom:'1px solid var(--line)', padding:'12px 0'}}>
             <div className="row-between" style={{cursor:'pointer'}} onClick={() => toggleExpanded(m)}>
               <h3 style={{margin:0, fontSize:15.5}}>
-                {isOpen ? '▾' : '▸'} {name} {year}{deleg && deleg.title ? ' — ' + deleg.title : ''}
+                {isOpen ? '▾' : '▸'} {name} {year}{(() => {
+                  // Show the walk's own title when it has one, so edits to a walk show up here;
+                  // otherwise fall back to the month's default title.
+                  const walkTitles = Array.from(new Set(monthWalks.map(w => (w.title || '').trim()).filter(Boolean)));
+                  const label = walkTitles.length ? walkTitles.join(' / ') : (deleg && deleg.title ? deleg.title : '');
+                  return label ? ' — ' + label : '';
+                })()}
               </h3>
               {monthWalks.length > 0 && <span style={{fontSize:12, color:'#8a9089'}}>{monthWalks.length} walk{monthWalks.length > 1 ? 's' : ''}</span>}
             </div>
@@ -1023,7 +1029,7 @@ function App() {
     return monthDelegations.find(d => d.year === year && d.month === month) || null;
   }, [monthDelegations]);
   const delegationForEvent = useCallback((ev) => {
-    if (!ev || ev.is_private) return null; // private walks never participate in the shared monthly delegation
+    if (!ev || ev.is_private || ev.trip_id) return null; // private walks and trips never participate in the shared monthly delegation
     if (ev.month_delegation_id) {
       const byId = monthDelegations.find(d => d.id === ev.month_delegation_id);
       if (byId) return byId;
@@ -1294,10 +1300,14 @@ function App() {
     return w;
   }, [roomInventory, roomStats, goingMembers]);
 
+  // Cos supports everyone: always has organiser rights, but his name only shows when he is ticked as an organiser.
+  const isSupport = !!myName && myName.trim().toLowerCase() === 'cos christou';
+
   const isTripOrganiser = useMemo(() => {
     if (!selectedTrip || !myName) return false;
+    if (isSupport) return true;
     return (selectedTrip.organisers || []).some(o => o.trim().toLowerCase() === myName.trim().toLowerCase());
-  }, [selectedTrip, myName]);
+  }, [selectedTrip, myName, isSupport]);
 
   const canEditTripPerson = useCallback((name) => {
     return isTripOrganiser;
@@ -1460,7 +1470,7 @@ function App() {
     if (!isRealIdentity) { flashToast(myName === 'Visitor' ? "Visitors can't create trips — pick your name instead" : 'Pick who you are first'); return; }
     setSelectedTripId(null);
     const prevTrip = [...trips].sort((a, b) => (b.start_date || '').localeCompare(a.start_date || '')).find(t => normaliseRooms(t.room_inventory).length > 0);
-    setTripForm({ name: '', start_date: '', end_date: '', organisers: [myName], details: '', floating_group_label: '', report_text: '', is_private: false,
+    setTripForm({ name: '', start_date: '', end_date: '', organisers: isSupport ? [] : [myName], details: '', floating_group_label: '', report_text: '', is_private: false,
       room_inventory: prevTrip ? normaliseRooms(prevTrip.room_inventory).map(r => ({ ...r, count: String(r.count) })) : [],
       hotel_name: '', rooms_copied_from: prevTrip ? prevTrip.name : '' });
     setEditingTrip(false);
@@ -1529,7 +1539,7 @@ function App() {
 
     if (editingTrip && selectedTrip) {
       if (!isTripOrganiser) { flashToast("Only this trip's organiser can save changes"); return; }
-      const organisers = tripForm.organisers.includes(myName) ? tripForm.organisers : [...tripForm.organisers, myName];
+      const organisers = (isSupport || tripForm.organisers.includes(myName)) ? tripForm.organisers : [...tripForm.organisers, myName];
       const { error } = await sb.from('trips').update({
         name: tripForm.name, start_date: tripForm.start_date, end_date: tripForm.end_date,
         organisers, details: tripForm.details,
@@ -1565,7 +1575,7 @@ function App() {
     }
 
     if (!isRealIdentity) { flashToast('Pick who you are first'); return; }
-    const organisers = tripForm.organisers.includes(myName) ? tripForm.organisers : [...tripForm.organisers, myName];
+    const organisers = (isSupport || tripForm.organisers.includes(myName)) ? tripForm.organisers : [...tripForm.organisers, myName];
     const { data: trip, error } = await sb.from('trips').insert({
       name: tripForm.name, start_date: tripForm.start_date, end_date: tripForm.end_date,
       organisers, details: tripForm.details,
@@ -1970,9 +1980,10 @@ function App() {
 
   const isOrganiserOfSelected = useMemo(() => {
     if (!selectedEvent || !myName) return false;
+    if (isSupport && !selectedEvent.is_private) return true;
     const list = effectiveOrganisers(selectedEvent);
     return list.some(o => o.trim().toLowerCase() === myName.trim().toLowerCase());
-  }, [selectedEvent, myName, effectiveOrganisers]);
+  }, [selectedEvent, myName, effectiveOrganisers, isSupport]);
 
   const canEditRow = useCallback((memberName) => {
     return isOrganiserOfSelected;
@@ -2052,7 +2063,7 @@ function App() {
   const openNewWalk = () => {
     if (!isRealIdentity) { flashToast(myName === 'Visitor' ? "Visitors can't create walks — pick your name instead" : 'Pick who you are first'); return; }
     setForm({
-      walk_date: '', title: '', organisers: [myName], details: '',
+      walk_date: '', title: '', organisers: isSupport ? [] : [myName], details: '',
       start_lat: '', start_lng: '', end_lat: '', end_lng: '',
       lunch_name: '', lunch_url: '',
       gpx_content: '', gpx_filename: '', route_link: '',
@@ -2133,7 +2144,7 @@ function App() {
     if (!form.walk_date) { flashToast('Pick a date first'); return; }
     if (editingWalk && selectedEvent && !isOrganiserOfSelected) { flashToast("Only this walk's organiser can save changes"); return; }
     if (!editingWalk && !isRealIdentity) { flashToast('Pick who you are first'); return; }
-    const organisers = form.organisers.includes(myName) ? form.organisers : [...form.organisers, myName];
+    const organisers = ((isSupport && !form.is_private) || form.organisers.includes(myName)) ? form.organisers : [...form.organisers, myName];
     const ym = ymOfDate(form.walk_date);
     // Private walks are personal, not part of the shared HDSG delegation — never
     // link or write to a month_delegations row for them.
@@ -2321,10 +2332,12 @@ function App() {
             <React.Fragment>
               <div className="card">
                 <div className="row-between">
-                  <div className="eyebrow">Monthly walk</div>
+                  <div className="eyebrow">{selectedEvent.trip_id ? 'Trip' : 'Monthly walk'}</div>
                   <div style={{display:'flex', gap:8}}>
                     <button className="btn small secondary" onClick={shareWalk}>📤 Share</button>
-                    <button className="btn small secondary" onClick={openEditWalk}>Edit</button>
+                    {selectedEvent.trip_id
+                      ? <button className="btn small" onClick={() => { setTab('trips'); setSelectedTripId(selectedEvent.trip_id); window.scrollTo(0, 0); }}>View trip info →</button>
+                      : <button className="btn small secondary" onClick={openEditWalk}>Edit</button>}
                   </div>
                 </div>
                 <h2 className="walk-title">{selectedEvent.title || 'Group walk'}{selectedEvent.is_private ? ' 🔒' : ''}</h2>
