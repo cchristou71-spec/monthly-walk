@@ -953,7 +953,8 @@ function App() {
   });
   const [newMemberName, setNewMemberName] = useState('');
   const [liftSortMode, setLiftSortMode] = useState('name');
-  const [whosInOpen, setWhosInOpen] = useState(true);
+  const [whosInOpen, setWhosInOpen] = useState(false);
+  const [selectedWalkSection, setSelectedWalkSection] = useState('details');
   // Room types are set per trip (the hotel changes each year): [{ key, label, count }]
   const normaliseRooms = (inv) => {
     if (!inv) return [];
@@ -2414,7 +2415,7 @@ function App() {
         <React.Fragment>
           {shareScope !== 'walk' && visibleEvents.length > 0 && !showNewWalk && (
             <div className="walk-picker">
-              <select value={selectedEventId || ''} onChange={e => setSelectedEventId(e.target.value)}>
+              <select value={selectedEventId || ''} onChange={e => { setSelectedEventId(e.target.value); setSelectedWalkSection('details'); setWhosInOpen(false); }}>
                 {visibleEvents.map(e => (
                   <option key={e.id} value={e.id}>
                     {fmtDateShort(e.walk_date)}{e.title ? ' — ' + e.title : ''}{e.is_private ? ' 🔒' : ''}
@@ -2442,6 +2443,14 @@ function App() {
 
           {selectedEvent && canViewSelectedEvent && !showNewWalk && (
             <React.Fragment>
+              <div className="walk-section-nav" style={{display:'flex',flexWrap:'wrap',gap:8,marginBottom:14}}>
+                {[['details','Walk Details'],['route','Route & Map'],['attendance','Attendance'],['lunch','Lunch'],['documents','Documents'],['pub_menu','Pub Menu'],['report','Walk Report']].map(([key,label]) => (
+                  <button key={key} className={'btn small ' + (selectedWalkSection === key ? '' : 'secondary')} onClick={() => { setSelectedWalkSection(key); if (key !== 'attendance') setWhosInOpen(false); }}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+              {selectedWalkSection === 'details' && (
               <div className="card">
                 <div className="row-between">
                   <div className="eyebrow">{selectedEvent.trip_id ? 'Trip' : 'Monthly walk'}</div>
@@ -2458,6 +2467,16 @@ function App() {
                   <p className="walk-meta">Organised by <b>{effectiveOrganisers(selectedEvent).join(', ')}</b></p>
                 )}
                 {selectedEvent.details && <p className="walk-details">{selectedEvent.details}</p>}
+                <div className="stat-row">
+                  <div className="stat"><b>{counts.walk}</b><span>Walking</span></div>
+                  <div className="stat"><b>{counts.lunch}</b><span>Lunch</span></div>
+                  <div className="stat"><b>{counts.drive}</b><span>Driving</span></div>
+                </div>
+              </div>
+              )}
+
+              {selectedWalkSection === 'route' && (
+              <div className="card">
                 {selectedEvent.route_link && (
                   <div className="route-links" style={{marginTop:10}}>
                     <a className="link-chip" target="_blank" rel="noopener noreferrer" href={selectedEvent.route_link}>
@@ -2500,20 +2519,22 @@ function App() {
                     )}
                   </div>
                 )}
-                {selectedEvent.lunch_name && (
+              </div>
+              )}
+
+              {selectedWalkSection === 'lunch' && (
+              <div className="card">
+                {selectedEvent.lunch_name ? (
                   <div className="lunch-chip">
                     🍴 Lunch: {toMapsLink(selectedEvent.lunch_url) ? (
                       <a href={toMapsLink(selectedEvent.lunch_url)} target="_blank" rel="noopener noreferrer">{selectedEvent.lunch_name}</a>
                     ) : selectedEvent.lunch_name}
                   </div>
-                )}
-                <div className="stat-row">
-                  <div className="stat"><b>{counts.walk}</b><span>Walking</span></div>
-                  <div className="stat"><b>{counts.lunch}</b><span>Lunch</span></div>
-                  <div className="stat"><b>{counts.drive}</b><span>Driving</span></div>
-                </div>
+                ) : <div className="empty">No lunch venue has been added yet.</div>}
               </div>
+              )}
 
+              {selectedWalkSection === 'documents' && (
               <div className="card">
                 <DocumentsSection
                   title="Documents"
@@ -2524,7 +2545,9 @@ function App() {
                   onDelete={(doc) => deleteDocument(doc, () => loadEventDocuments(selectedEvent.id))}
                 />
               </div>
+              )}
 
+              {selectedWalkSection === 'pub_menu' && (
               <div className="card">
                 <DocumentsSection
                   title="Pub menu"
@@ -2535,7 +2558,9 @@ function App() {
                   onDelete={(doc) => deleteDocument(doc, () => loadEventDocuments(selectedEvent.id))}
                 />
               </div>
+              )}
 
+              {selectedWalkSection === 'report' && (
               <div className="card">
                 {selectedEvent.report_text && (
                   <p className="walk-details" style={{margin: '0 0 10px', whiteSpace:'pre-wrap'}}>{selectedEvent.report_text}</p>
@@ -2549,7 +2574,9 @@ function App() {
                   onDelete={(doc) => deleteDocument(doc, () => loadEventDocuments(selectedEvent.id))}
                 />
               </div>
+              )}
 
+              {selectedWalkSection === 'attendance' && (
               <div className="card">
                 <div className="eyebrow" style={{marginBottom:8}}>Who's going</div>
                 {(() => {
@@ -2647,6 +2674,7 @@ function App() {
                   </React.Fragment>
                 )}
               </div>
+              )}
             </React.Fragment>
           )}
 
