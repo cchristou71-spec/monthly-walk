@@ -300,6 +300,9 @@
     background:#fff; border:1px solid var(--line); text-decoration:none; color:inherit; cursor:pointer; font-size:15px;
   }
   .doc-action-btn{background:none; border:none; color:#8a9089;}
+  .menu-text-view{display:block; width:100%; max-width:100%; box-sizing:border-box; align-self:stretch; flex:0 0 100%; margin:10px 0 14px 0; padding:18px 20px; background:#fff; border:1px solid var(--line); border-left:4px solid var(--sage); border-radius:12px; color:var(--ink); font-size:14px; line-height:1.75; text-align:left; direction:ltr; white-space:pre-wrap; overflow-wrap:anywhere; word-break:normal; overflow-x:hidden; max-height:65vh; overflow-y:auto; box-shadow:0 2px 8px rgba(31,59,44,.05);}
+  .menu-text-view-title{font-size:12px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:var(--muted); margin:0 0 8px;}
+  @media(max-width:520px){.doc-row{gap:7px; padding:9px;}.doc-action{width:32px;height:32px;font-size:13px;}.menu-text-view{padding:14px;font-size:13.5px;line-height:1.7;}}
 
   .going-summary{display:flex; flex-direction:column; gap:14px;}
   .going-summary-driver{font-size:14px; font-weight:700; color:var(--forest); margin-bottom:4px;}
@@ -819,9 +822,14 @@ function DocumentsSection({ title, docs, onUpload, onDelete, canEdit, uploading,
           {isTextDoc(doc) && <button type="button" className="doc-action doc-action-btn" onClick={() => viewTextFile(doc)} title="View menu details">{loadingTextId === doc.id ? 'Loading…' : viewingTextId === doc.id ? 'Hide' : 'View'}</button>}
           {isTextDoc(doc) && <button type="button" className="doc-action doc-action-btn" onClick={() => copyTextFile(doc)} title="Copy text">Copy</button>}
           <a className="doc-action" href={doc.file_url} target="_blank" rel="noopener noreferrer" title="Open / download">📤</a>
-          {isTextDoc(doc) && viewingTextId === doc.id && <div style={{gridColumn:'1 / -1', whiteSpace:'pre-wrap', overflowWrap:'anywhere', background:'var(--sage-soft)', borderRadius:8, padding:12, marginTop:8, fontSize:14, lineHeight:1.5}}>{viewingText || '(This menu is empty.)'}</div>}
           {canEdit && <button className="doc-action doc-action-btn" onClick={() => onDelete(doc)} title="Delete">✕</button>}
         </div>
+        {isTextDoc(doc) && viewingTextId === doc.id && (
+          <div className="menu-text-view" role="region" aria-label={`Full menu: ${doc.file_name}`}>
+            <div className="menu-text-view-title">Menu details</div>
+            {viewingText.replace(/\r\n?/g, '\n').trim() || '(This menu is empty.)'}
+          </div>
+        )}
       ))}
     </div>
   );
