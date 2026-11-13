@@ -748,6 +748,22 @@ function CompassMark() {
 function DocumentsSection({ title, docs, onUpload, onDelete, canEdit, uploading, allowText=false, onSaveText }) {
   const [textDraft, setTextDraft] = useState('');
   const [savingText, setSavingText] = useState(false);
+  const [viewingTextId, setViewingTextId] = useState(null);
+  const [viewingText, setViewingText] = useState('');
+  const [loadingTextId, setLoadingTextId] = useState(null);
+  const isTextDoc = (doc) => doc.content_type === 'text/plain' || (doc.file_name || '').toLowerCase().endsWith('.txt');
+  const viewTextFile = async (doc) => {
+    if (viewingTextId === doc.id) { setViewingTextId(null); setViewingText(''); return; }
+    setLoadingTextId(doc.id);
+    try {
+      const response = await fetch(doc.file_url);
+      if (!response.ok) throw new Error('Could not read text file');
+      const text = await response.text();
+      setViewingText(text);
+      setViewingTextId(doc.id);
+    } catch (err) { alert('Could not open this menu text. Please try the Open / download link.'); }
+    finally { setLoadingTextId(null); }
+  };
   const copyTextFile = async (doc) => {
     try {
       const response = await fetch(doc.file_url);
@@ -800,8 +816,10 @@ function DocumentsSection({ title, docs, onUpload, onDelete, canEdit, uploading,
             <div className="doc-name">{doc.file_name}</div>
             <div className="doc-meta">{fmtFileSize(doc.file_size)}{doc.uploaded_by ? ` · added by ${doc.uploaded_by}` : ''}</div>
           </div>
-          {(doc.content_type === 'text/plain' || (doc.file_name || '').toLowerCase().endsWith('.txt')) && <button type="button" className="doc-action doc-action-btn" onClick={() => copyTextFile(doc)} title="Copy text">Copy</button>}
+          {isTextDoc(doc) && <button type="button" className="doc-action doc-action-btn" onClick={() => viewTextFile(doc)} title="View menu details">{loadingTextId === doc.id ? 'Loading…' : viewingTextId === doc.id ? 'Hide' : 'View'}</button>}
+          {isTextDoc(doc) && <button type="button" className="doc-action doc-action-btn" onClick={() => copyTextFile(doc)} title="Copy text">Copy</button>}
           <a className="doc-action" href={doc.file_url} target="_blank" rel="noopener noreferrer" title="Open / download">📤</a>
+          {isTextDoc(doc) && viewingTextId === doc.id && <div style={{gridColumn:'1 / -1', whiteSpace:'pre-wrap', overflowWrap:'anywhere', background:'var(--sage-soft)', borderRadius:8, padding:12, marginTop:8, fontSize:14, lineHeight:1.5}}>{viewingText || '(This menu is empty.)'}</div>}
           {canEdit && <button className="doc-action doc-action-btn" onClick={() => onDelete(doc)} title="Delete">✕</button>}
         </div>
       ))}
