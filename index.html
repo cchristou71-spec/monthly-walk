@@ -3336,6 +3336,7 @@ function App() {
           )}
 
           {tripSection === 'attendance' && (
+          <React.Fragment>
           <div className="card">
             <div className="eyebrow" style={{marginBottom:8}}>Attendance &amp; rooms</div>
             {selectedTrip.hotel_name && <p style={{fontSize:13.5, fontWeight:600, color:'var(--forest)', margin:'0 0 10px'}}>🏨 {selectedTrip.hotel_name}</p>}
@@ -3485,7 +3486,7 @@ function App() {
               </React.Fragment>
             )}
           </div>
-
+          </React.Fragment>
           )}
 
           {tripSection === 'documents' && (
