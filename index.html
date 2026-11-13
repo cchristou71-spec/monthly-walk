@@ -961,6 +961,7 @@ function App() {
     const names = { single: 'Single', twin: 'Twin', double: 'Double', superior: 'Superior/Queen' };
     return Object.keys(inv).map(k => ({ key: k, label: names[k] || k, count: parseInt(inv[k], 10) || 0 }));
   };
+  const [tripSection, setTripSection] = useState('walks');
   const [tripGoingOpen, setTripGoingOpen] = useState(false);
   const [editingPersonId, setEditingPersonId] = useState(null);
   const [tripGoingOnly, setTripGoingOnly] = useState(false);
@@ -2938,7 +2939,27 @@ function App() {
           </div>
 
           {!selectedLevel && (
+            <div className="card" style={{padding:'12px 14px'}}>
+              <div className="eyebrow" style={{marginBottom:10}}>Trip sections</div>
+              <div style={{display:'flex', flexWrap:'wrap', gap:7}}>
+                {[
+                  ['walks','Walks by Day'],
+                  ['meals','Meal Selections'],
+                  ['attendance','Attendance & Rooms'],
+                  ['documents','Trip Documents'],
+                  ['pub_menu','Pub Menu'],
+                  ['report','Trip Report']
+                ].map(([key,label]) => (
+                  <button key={key} className={"btn small " + (tripSection === key ? '' : 'secondary')}
+                    onClick={() => setTripSection(key)}>{label}</button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {!selectedLevel && (
           <React.Fragment>
+          {tripSection === 'walks' && (
           <div className="card">
             <div className="eyebrow">Walks by day</div>
             {tripDays.length === 0 && <div className="empty">No days yet.</div>}
@@ -3143,6 +3164,9 @@ function App() {
             </div>
           </div>
 
+          )}
+
+          {tripSection === 'meals' && (
           <div className="card">
             <div className="day-header" onClick={() => setMealsOpen(o => !o)}>
               <div className="eyebrow" style={{marginBottom:0}}>Meal selections</div>
@@ -3309,6 +3333,9 @@ function App() {
             )}
           </div>
 
+          )}
+
+          {tripSection === 'attendance' && (
           <div className="card">
             <div className="eyebrow" style={{marginBottom:8}}>Attendance &amp; rooms</div>
             {selectedTrip.hotel_name && <p style={{fontSize:13.5, fontWeight:600, color:'var(--forest)', margin:'0 0 10px'}}>🏨 {selectedTrip.hotel_name}</p>}
@@ -3459,6 +3486,9 @@ function App() {
             )}
           </div>
 
+          )}
+
+          {tripSection === 'documents' && (
           <div className="card">
             <div className="day-header" onClick={() => toggleTripDocsOpen('general')}>
               <div className="eyebrow" style={{marginBottom:0}}>Trip documents</div>
@@ -3478,6 +3508,9 @@ function App() {
             )}
           </div>
 
+          )}
+
+          {tripSection === 'pub_menu' && (
           <div className="card">
             <div className="day-header" onClick={() => toggleTripDocsOpen('pub_menu')}>
               <div className="eyebrow" style={{marginBottom:0}}>Pub menu</div>
@@ -3497,6 +3530,9 @@ function App() {
             )}
           </div>
 
+          )}
+
+          {tripSection === 'report' && (
           <div className="card">
             <div className="day-header" onClick={() => toggleTripDocsOpen('report')}>
               <div className="eyebrow" style={{marginBottom:0}}>Trip report</div>
@@ -3518,6 +3554,7 @@ function App() {
               </div>
             )}
           </div>
+          )}
           </React.Fragment>
           )}
 
