@@ -326,6 +326,15 @@
   .att-row{display:flex; justify-content:space-between; gap:10px; font-size:13.5px; color:#3a4a3f; padding:3px 0;}
   .att-room{font-weight:600; color:var(--forest); text-align:right;}
   .att-room.none{color:#B5483A; font-weight:500; font-style:italic;}
+  .paid-tag{font-size:11px; font-weight:700; margin-left:6px; padding:1px 7px; border-radius:999px; background:#EEF0EC; color:#5b6960;}
+  .paid-tag.yes{background:var(--sage-soft); color:var(--forest);}
+  .going-table{width:100%; border-collapse:collapse; font-size:12.5px; color:#3a4a3f; min-width:420px;}
+  .going-table th{text-align:left; font-size:10.5px; text-transform:uppercase; letter-spacing:.04em; color:#5b6960; padding:4px 6px; border-bottom:1px solid var(--line);}
+  .going-table td{padding:7px 6px; border-bottom:1px solid var(--line); vertical-align:middle;}
+  .going-table .gt-name{font-weight:600; color:var(--ink);}
+  .going-table .gt-none{color:#B5483A; font-style:italic;}
+  .going-table tr.editing td{background:var(--sage-soft);}
+  .going-table tr.editing-row td{background:#fafaf6; padding:8px;}
   .att-names{font-size:13.5px; color:#3a4a3f; line-height:1.7;}
   .room-grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(78px,1fr)); gap:6px; margin-bottom:6px;}
   .room-edit-row{display:flex; gap:8px; align-items:center; margin-bottom:8px;}
@@ -953,6 +962,7 @@ function App() {
     return Object.keys(inv).map(k => ({ key: k, label: names[k] || k, count: parseInt(inv[k], 10) || 0 }));
   };
   const [tripGoingOpen, setTripGoingOpen] = useState(false);
+  const [editingPersonId, setEditingPersonId] = useState(null);
   const [tripGoingOnly, setTripGoingOnly] = useState(false);
   const [tripDocsOpen, setTripDocsOpen] = useState({});
   const toggleTripDocsOpen = (key) => setTripDocsOpen(prev => ({ ...prev, [key]: !prev[key] }));
@@ -1406,6 +1416,105 @@ function App() {
       await sb.from('trip_attendees').upsert({ trip_id: selectedTripId, member_name: memberName, going: next === 'going', updated_at: payload.updated_at }, { onConflict: 'trip_id,member_name' });
       flashToast('Saved as going only — database update needed for Maybe / Declined');
     }
+  };
+
+  const tripNightsTotal = (selectedTrip && selectedTrip.start_date && selectedTrip.end_date)
+    ? Math.max(Math.round((new Date(selectedTrip.end_date) - new Date(selectedTrip.start_date)) / 86400000), 0) : 0;
+
+  const setNights = async (memberName, value) => {
+    if (!canEditTripPerson(memberName)) { flashToast(myName ? `Only this trip's organiser can update that` : 'Pick who you are first'); return; }
+    const existing = attendeeFor(memberName);
+    if (!existing || attendeeStatusOf(existing) !== 'going') { flashToast('Mark them as going first'); return; }
+    const next = (value === '' || value == null || Number(value) >= tripNightsTotal) ? null : Number(value);
+    const payload = { trip_id: selectedTripId, member_name: memberName, nights: next, updated_at: new Date().toISOString() };
+    setTripAttendees(prev => [...prev.filter(a => a.member_name !== memberName), { ...existing, ...payload }]);
+    const { error } = await sb.from('trip_attendees').upsert(payload, { onConflict: 'trip_id,member_name' });
+    if (error) {
+      setTripAttendees(prev => [...prev.filter(a => a.member_name !== memberName), existing]);
+      flashToast('Nights not saved — database update needed first');
+    }
+  };
+
+  const setPaid = async (memberName) => {
+    if (!canEditTripPerson(memberName)) { flashToast(myName ? `Only this trip's organiser can update that` : 'Pick who you are first'); return; }
+    const existing = attendeeFor(memberName);
+    if (!existing || (attendeeStatusOf(existing) !== 'going' && !existing.paid)) { flashToast('Mark them as going first'); return; }
+    const next = !existing.paid;
+    const payload = { trip_id: selectedTripId, member_name: memberName, paid: next, updated_at: new Date().toISOString() };
+    setTripAttendees(prev => [...prev.filter(a => a.member_name !== memberName), { ...existing, ...payload }]);
+    const { error } = await sb.from('trip_attendees').upsert(payload, { onConflict: 'trip_id,member_name' });
+    if (error) {
+      setTripAttendees(prev => [...prev.filter(a => a.member_name !== memberName), existing]);
+      flashToast('Paid not saved — database update needed first');
+    }
+  };
+
+  const renderAttendeeEditor = (m) => {
+      const a = attendeeFor(m.name);
+      const d = driverFor(m.name);
+      const st = attendeeStatusOf(a);
+      const editable = canEditTripPerson(m.name);
+      return (
+        <div className={"member-row" + (editable ? '' : ' locked')} key={m.id} style={{flexWrap:'wrap'}}>
+          <div className="member-name">{m.name}{!editable && ' 🔒'}</div>
+          <div className="toggle-group">
+            <div className={"toggle" + (st === 'going' ? ' on' : '') + (editable ? '' : ' locked')}
+              onClick={() => setAttendStatus(m.name, 'going')} title="Going">✓</div>
+            <div className={"toggle" + (st === 'maybe' ? ' on maybe' : '') + (editable ? '' : ' locked')}
+              onClick={() => setAttendStatus(m.name, 'maybe')} title="Maybe">?</div>
+            <div className={"toggle" + (st === 'declined' ? ' on declined' : '') + (editable ? '' : ' locked')}
+              onClick={() => setAttendStatus(m.name, 'declined')} title="Declined">✗</div>
+            <div className={"toggle" + (d && d.driving ? ' on' : '') + (editable ? '' : ' locked')}
+              onClick={() => setDriving(m.name, !(d && d.driving))} title="Driving">🚗</div>
+            <div className={"toggle" + (d && d.driving && d.can_give_lift !== false ? ' on lift' : '') + (editable ? '' : ' locked') + (d && d.driving ? '' : ' invisible')}
+              onClick={() => setTripCanGiveLift(m.name, !(d.can_give_lift !== false))} title="Can give a lift">+</div>
+          </div>
+          {(st === 'going' || (a && a.paid)) && (
+            <label className="paid-check" style={{display:'flex', alignItems:'center', gap:6, width:'100%', margin:'6px 0 0', cursor: editable ? 'pointer' : 'default'}}>
+              <input type="checkbox" checked={!!(a && a.paid)} disabled={!editable} onChange={() => setPaid(m.name)} />
+              Paid
+            </label>
+          )}
+          {st === 'going' && tripNightsTotal > 0 && (
+          <div style={{width:'100%', margin:'6px 0 0'}}>
+            <select className="lift-select" value={(a && a.nights != null) ? String(a.nights) : ''} disabled={!editable}
+              onChange={e => setNights(m.name, e.target.value)}>
+              <option value="">Nights: whole trip ({tripNightsTotal})</option>
+              {Array.from({length: tripNightsTotal - 1}, (_, i) => i + 1).map(n => (
+                <option key={n} value={String(n)}>Nights: {n} only</option>
+              ))}
+            </select>
+          </div>
+        )}
+        {st === 'going' && !(d && d.driving) && (
+            <div style={{width:'100%', margin:'6px 0 0'}}>
+              <select className="lift-select" value={(d && d.passenger_of) || ''} disabled={!editable}
+                onChange={e => setTripPassengerOf(m.name, e.target.value)}>
+                <option value="">Going with: own transport</option>
+                {goingMembers.filter(x => x.name !== m.name && driverFor(x.name) && driverFor(x.name).driving && driverFor(x.name).can_give_lift !== false).map(x => (
+                  <option key={x.name} value={x.name}>Going with: {x.name}</option>
+                ))}
+              </select>
+            </div>
+          )}
+          {st === 'going' && (
+            <div className="room-pick">
+              {ROOM_TYPES.map(r => {
+                const stat = roomStats[r.key];
+                const mine = a && a.room_type === r.key;
+                const full = !!roomInventory && (mine ? stat.used > stat.total : stat.used >= stat.total);
+                return (
+                  <button key={r.key} type="button"
+                    className={"room-pill" + (mine ? ' on' : '') + (full ? ' full' : '') + (editable ? '' : ' locked')}
+                    onClick={() => setRoomType(m.name, r.key)}>
+                    {r.label}{roomInventory ? ` · ${Math.max(stat.total - stat.used, 0)} left` : ''}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      );
   };
 
   const setRoomType = async (memberName, roomKey) => {
@@ -3208,6 +3317,7 @@ function App() {
               <span className="att-chip maybe">? Maybe {attendanceGroups.maybe.length}</span>
               <span className="att-chip none">Not responded {attendanceGroups.none.length}</span>
               <span className="att-chip declined">✗ Declined {attendanceGroups.declined.length}</span>
+              <span className="att-chip">£ Paid {activeMembers.filter(m => (attendeeFor(m.name) || {}).paid).length}</span>
             </div>
             {roomWarnings.length > 0 && (
               <div className="room-warning">{roomWarnings.map((w, i) => <div key={i}>⚠ {w}</div>)}</div>
@@ -3229,58 +3339,74 @@ function App() {
             ) : (isTripOrganiser && <p style={{fontSize:12.5, color:'#8a9089', margin:'0 0 6px'}}>Add room numbers under Edit trip to see availability.</p>)}
 
             <div className="att-heading">Going ({attendanceGroups.going.length})</div>
-            {attendanceGroups.going.length === 0 ? <div className="empty">No one yet.</div> : attendanceGroups.going.map(m => {
-              const a = attendeeFor(m.name);
-              const rt = a && a.room_type ? ROOM_TYPES.find(r => r.key === a.room_type) : null;
-              return (
-                <div className="att-row" key={m.id}>
-                  <span>{m.name}</span>
-                  <span className={"att-room" + (rt ? '' : ' none')}>{rt ? rt.label : 'No room type'}</span>
-                </div>
-              );
-            })}
+            {attendanceGroups.going.length === 0 ? <div className="empty">No one yet.</div> : (
+              <div style={{overflowX:'auto'}}>
+                <table className="going-table">
+                  <thead>
+                    <tr><th>Name</th><th>Nights</th><th>Driving</th><th>Room</th><th>Paid</th><th>Going with</th><th></th></tr>
+                  </thead>
+                  <tbody>
+                    {attendanceGroups.going.map(m => {
+                      const a = attendeeFor(m.name);
+                      const d = driverFor(m.name);
+                      const rt = a && a.room_type ? ROOM_TYPES.find(r => r.key === a.room_type) : null;
+                      const isDriver = !!(d && d.driving);
+                      const passengers = isDriver ? goingMembers.filter(x => { const dd = driverFor(x.name); return dd && !dd.driving && dd.passenger_of === m.name; }) : [];
+                      const goingWith = isDriver
+                        ? (passengers.length ? 'Takes: ' + passengers.map(x => x.name).join(', ') : 'No passengers')
+                        : ((d && d.passenger_of) || 'Own transport');
+                      const open = editingPersonId === m.id;
+                      return (
+                        <React.Fragment key={m.id}>
+                          <tr className={open ? 'editing' : ''}>
+                            <td className="gt-name">{m.name}</td>
+                            <td>{a && a.nights != null ? <b>{a.nights}</b> : (tripNightsTotal > 0 ? tripNightsTotal : '—')}</td>
+                            <td>{isDriver ? '🚗' : '—'}</td>
+                            <td className={rt ? '' : 'gt-none'}>{rt ? rt.label : 'None'}</td>
+                            <td><span className={"paid-tag" + (a && a.paid ? ' yes' : '')} style={{marginLeft:0}}>{a && a.paid ? '✓ Paid' : 'No'}</span></td>
+                            <td>{goingWith}</td>
+                            <td><button className="btn small secondary" style={{padding:'4px 9px'}} onClick={() => setEditingPersonId(open ? null : m.id)}>{open ? 'Done' : 'Edit'}</button></td>
+                          </tr>
+                          {open && (
+                            <tr className="editing-row"><td colSpan={7}>{renderAttendeeEditor(m)}</td></tr>
+                          )}
+                        </React.Fragment>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
             <div className="att-heading">Maybe ({attendanceGroups.maybe.length})</div>
             <div className="att-names">{attendanceGroups.maybe.length ? attendanceGroups.maybe.map(m => m.name).join(', ') : '—'}</div>
             <div className="att-heading">Not responded ({attendanceGroups.none.length})</div>
             <div className="att-names">{attendanceGroups.none.length ? attendanceGroups.none.map(m => m.name).join(', ') : '—'}</div>
             <div className="att-heading">Declined ({attendanceGroups.declined.length})</div>
             <div className="att-names">{attendanceGroups.declined.length ? attendanceGroups.declined.map(m => m.name).join(', ') : '—'}</div>
-          </div>
-
-          <div className="card">
-            <div className="eyebrow" style={{marginBottom:8}}>Who's going &amp; driving</div>
             {(() => {
-              if (goingMembers.length === 0) return <div className="empty">No one's marked as going yet.</div>;
-              const drivers = goingMembers.filter(m => { const d = driverFor(m.name); return d && d.driving; });
-              const nonDrivers = goingMembers.filter(m => { const d = driverFor(m.name); return !(d && d.driving); });
-              const unassigned = nonDrivers.filter(m => { const d = driverFor(m.name); return !(d && d.passenger_of); });
+              const refunds = activeMembers.filter(m => { const a = attendeeFor(m.name); return a && a.paid && attendeeStatusOf(a) !== 'going'; });
+              if (refunds.length === 0) return null;
               return (
-                <div className="going-summary">
-                  {drivers.map(d => {
-                    const passengers = nonDrivers.filter(m => { const dd = driverFor(m.name); return dd && dd.passenger_of === d.name; });
+                <React.Fragment>
+                  <div className="att-heading">Paid but not going — refund? ({refunds.length})</div>
+                  {refunds.map(m => {
+                    const st = attendeeStatusOf(attendeeFor(m.name));
                     return (
-                      <div key={d.id}>
-                        <div className="going-summary-driver">🚗 {d.name}</div>
-                        {passengers.length > 0 ? (
-                          passengers.map(p => <div className="going-summary-passenger" key={p.id}>{p.name}</div>)
-                        ) : (
-                          <div className="going-summary-passenger muted">No passengers</div>
-                        )}
+                      <div className="att-row" key={m.id}>
+                        <span>{m.name} <span className="paid-tag yes">✓ Paid</span></span>
+                        <span className="att-room none" style={{fontStyle:'normal'}}>{st === 'maybe' ? 'Maybe' : st === 'declined' ? 'Declined' : 'Not responded'}</span>
                       </div>
                     );
                   })}
-                  {unassigned.length > 0 && (
-                    <div>
-                      <div className="going-summary-driver">🚶 Own transport</div>
-                      {unassigned.map(p => <div className="going-summary-passenger" key={p.id}>{p.name}</div>)}
-                    </div>
-                  )}
-                </div>
+                </React.Fragment>
               );
             })()}
+          </div>
 
+          <div className="card">
+            <div className="eyebrow" style={{marginBottom:8}}>Edit attendance</div>
             <button className="btn small secondary" style={{marginTop:14}} onClick={() => setTripGoingOpen(o => !o)}>
-              {tripGoingOpen ? 'Hide attendance editor' : 'Edit attendance'}
+              {tripGoingOpen ? 'Hide attendance editor' : 'Edit everyone'}
             </button>
 
             {tripGoingOpen && (
@@ -3297,45 +3423,7 @@ function App() {
                   <span>🚗 Driving to/from hotel</span>
                   <span>+ = can give a lift</span>
                 </div>
-                {filteredMembers.filter(m => !tripGoingOnly || attendeeStatusOf(attendeeFor(m.name)) === 'going').map(m => {
-                  const a = attendeeFor(m.name);
-                  const d = driverFor(m.name);
-                  const st = attendeeStatusOf(a);
-                  const editable = canEditTripPerson(m.name);
-                  return (
-                    <div className={"member-row" + (editable ? '' : ' locked')} key={m.id} style={{flexWrap:'wrap'}}>
-                      <div className="member-name">{m.name}{!editable && ' 🔒'}</div>
-                      <div className="toggle-group">
-                        <div className={"toggle" + (st === 'going' ? ' on' : '') + (editable ? '' : ' locked')}
-                          onClick={() => setAttendStatus(m.name, 'going')} title="Going">✓</div>
-                        <div className={"toggle" + (st === 'maybe' ? ' on maybe' : '') + (editable ? '' : ' locked')}
-                          onClick={() => setAttendStatus(m.name, 'maybe')} title="Maybe">?</div>
-                        <div className={"toggle" + (st === 'declined' ? ' on declined' : '') + (editable ? '' : ' locked')}
-                          onClick={() => setAttendStatus(m.name, 'declined')} title="Declined">✗</div>
-                        <div className={"toggle" + (d && d.driving ? ' on' : '') + (editable ? '' : ' locked')}
-                          onClick={() => setDriving(m.name, !(d && d.driving))} title="Driving">🚗</div>
-                        <div className={"toggle" + (d && d.driving && d.can_give_lift !== false ? ' on lift' : '') + (editable ? '' : ' locked') + (d && d.driving ? '' : ' invisible')}
-                          onClick={() => setTripCanGiveLift(m.name, !(d.can_give_lift !== false))} title="Can give a lift">+</div>
-                      </div>
-                      {st === 'going' && (
-                        <div className="room-pick">
-                          {ROOM_TYPES.map(r => {
-                            const stat = roomStats[r.key];
-                            const mine = a && a.room_type === r.key;
-                            const full = !!roomInventory && (mine ? stat.used > stat.total : stat.used >= stat.total);
-                            return (
-                              <button key={r.key} type="button"
-                                className={"room-pill" + (mine ? ' on' : '') + (full ? ' full' : '') + (editable ? '' : ' locked')}
-                                onClick={() => setRoomType(m.name, r.key)}>
-                                {r.label}{roomInventory ? ` · ${Math.max(stat.total - stat.used, 0)} left` : ''}
-                              </button>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
+                {filteredMembers.filter(m => !tripGoingOnly || attendeeStatusOf(attendeeFor(m.name)) === 'going').map(m => renderAttendeeEditor(m))}
 
                 {(() => {
                   const driverMembers = goingMembers.filter(m => { const d = driverFor(m.name); return d && d.driving; });
