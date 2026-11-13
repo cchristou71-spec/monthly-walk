@@ -813,7 +813,8 @@ function DocumentsSection({ title, docs, onUpload, onDelete, canEdit, uploading,
       )}
       {docs.length === 0 && <div className="empty">No documents yet.</div>}
       {docs.map(doc => (
-        <div className="doc-row" key={doc.id}>
+        <React.Fragment key={doc.id}>
+        <div className="doc-row">
           <div className="doc-icon">{doc.content_type === 'text/plain' || (doc.file_name || '').toLowerCase().endsWith('.txt') ? '📝' : '📘'}</div>
           <div className="doc-info">
             <div className="doc-name">{doc.file_name}</div>
@@ -830,6 +831,7 @@ function DocumentsSection({ title, docs, onUpload, onDelete, canEdit, uploading,
             {viewingText.replace(/\r\n?/g, '\n').trim() || '(This menu is empty.)'}
           </div>
         )}
+        </React.Fragment>
       ))}
     </div>
   );
