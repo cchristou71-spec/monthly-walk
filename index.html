@@ -751,34 +751,50 @@ function CompassMark() {
 function DocumentsSection({ title, docs, onUpload, onDelete, canEdit, uploading, allowText=false, onSaveText }) {
   const [textDraft, setTextDraft] = useState('');
   const [savingText, setSavingText] = useState(false);
-  const [viewingTextId, setViewingTextId] = useState(null);
-  const [viewingText, setViewingText] = useState('');
-  const [loadingTextId, setLoadingTextId] = useState(null);
+  const [textContents, setTextContents] = useState({});
+  const [loadingTextIds, setLoadingTextIds] = useState({});
+  const [failedTextIds, setFailedTextIds] = useState({});
   const isTextDoc = (doc) => doc.content_type === 'text/plain' || (doc.file_name || '').toLowerCase().endsWith('.txt');
-  const viewTextFile = async (doc) => {
-    if (viewingTextId === doc.id) { setViewingTextId(null); setViewingText(''); return; }
-    setLoadingTextId(doc.id);
-    try {
-      const response = await fetch(doc.file_url);
-      if (!response.ok) throw new Error('Could not read text file');
-      const text = await response.text();
-      setViewingText(text);
-      setViewingTextId(doc.id);
-    } catch (err) { alert('Could not open this menu text. Please try the Open / download link.'); }
-    finally { setLoadingTextId(null); }
-  };
+
+  const textDocSignature = docs.filter(doc => doc.content_type === 'text/plain' || (doc.file_name || '').toLowerCase().endsWith('.txt'))
+    .map(doc => `${doc.id}:${doc.file_url}`).join('|');
+  useEffect(() => {
+    let cancelled = false;
+    const textDocs = docs.filter(doc => doc.content_type === 'text/plain' || (doc.file_name || '').toLowerCase().endsWith('.txt'));
+    textDocs.forEach(async doc => {
+      if (Object.prototype.hasOwnProperty.call(textContents, doc.id)) return;
+      if (cancelled) return;
+      setLoadingTextIds(prev => ({ ...prev, [doc.id]: true }));
+      try {
+        const response = await fetch(doc.file_url);
+        if (!response.ok) throw new Error('Could not read text file');
+        const text = await response.text();
+        if (!cancelled) setTextContents(prev => ({ ...prev, [doc.id]: text }));
+      } catch (err) {
+        if (!cancelled) setFailedTextIds(prev => ({ ...prev, [doc.id]: true }));
+      } finally {
+        if (!cancelled) setLoadingTextIds(prev => ({ ...prev, [doc.id]: false }));
+      }
+    });
+    return () => { cancelled = true; };
+  }, [textDocSignature]);
+
   const copyTextFile = async (doc) => {
     try {
-      const response = await fetch(doc.file_url);
-      if (!response.ok) throw new Error('Could not read text file');
-      const text = await response.text();
+      let text;
+      if (Object.prototype.hasOwnProperty.call(textContents, doc.id)) text = textContents[doc.id];
+      else {
+        const response = await fetch(doc.file_url);
+        if (!response.ok) throw new Error('Could not read text file');
+        text = await response.text();
+      }
       if (navigator.clipboard && navigator.clipboard.writeText) await navigator.clipboard.writeText(text);
       else {
         const area = document.createElement('textarea'); area.value = text; document.body.appendChild(area);
         area.select(); document.execCommand('copy'); area.remove();
       }
       alert('Text copied to clipboard');
-    } catch (err) { alert('Could not copy this text. Open the file and copy it manually.'); }
+    } catch (err) { alert('Could not copy this text. Please try again.'); }
   };
   const saveText = async () => {
     const value = textDraft.trim();
@@ -808,29 +824,28 @@ function DocumentsSection({ title, docs, onUpload, onDelete, canEdit, uploading,
           <button type="button" className="btn small primary" disabled={!textDraft.trim() || savingText || uploading} onClick={saveText} style={{marginTop:8}}>
             {savingText || uploading ? 'Saving…' : 'Save menu text'}
           </button>
-          <div style={{fontSize:12, color:'var(--muted)', marginTop:6}}>Saved as a text document that everyone can open and copy.</div>
+          <div style={{fontSize:12, color:'var(--muted)', marginTop:6}}>Saved menu text appears automatically below.</div>
         </div>
       )}
       {docs.length === 0 && <div className="empty">No documents yet.</div>}
       {docs.map(doc => (
         <React.Fragment key={doc.id}>
-        <div className="doc-row">
-          <div className="doc-icon">{doc.content_type === 'text/plain' || (doc.file_name || '').toLowerCase().endsWith('.txt') ? '📝' : '📘'}</div>
-          <div className="doc-info">
-            <div className="doc-name">{doc.file_name}</div>
-            <div className="doc-meta">{fmtFileSize(doc.file_size)}{doc.uploaded_by ? ` · added by ${doc.uploaded_by}` : ''}</div>
+          <div className="doc-row">
+            <div className="doc-icon">{isTextDoc(doc) ? '📝' : '📘'}</div>
+            <div className="doc-info">
+              <div className="doc-name">{doc.file_name}</div>
+              <div className="doc-meta">{fmtFileSize(doc.file_size)}{doc.uploaded_by ? ` · added by ${doc.uploaded_by}` : ''}</div>
+            </div>
+            {isTextDoc(doc) && <button type="button" className="doc-action doc-action-btn" onClick={() => copyTextFile(doc)} title="Copy menu text">Copy</button>}
+            {!isTextDoc(doc) && <a className="doc-action" href={doc.file_url} target="_blank" rel="noopener noreferrer" title="Open / download">📤</a>}
+            {canEdit && <button className="doc-action doc-action-btn" onClick={() => onDelete(doc)} title="Delete">✕</button>}
           </div>
-          {isTextDoc(doc) && <button type="button" className="doc-action doc-action-btn" onClick={() => viewTextFile(doc)} title="View menu details">{loadingTextId === doc.id ? 'Loading…' : viewingTextId === doc.id ? 'Hide' : 'View'}</button>}
-          {isTextDoc(doc) && <button type="button" className="doc-action doc-action-btn" onClick={() => copyTextFile(doc)} title="Copy text">Copy</button>}
-          <a className="doc-action" href={doc.file_url} target="_blank" rel="noopener noreferrer" title="Open / download">📤</a>
-          {canEdit && <button className="doc-action doc-action-btn" onClick={() => onDelete(doc)} title="Delete">✕</button>}
-        </div>
-        {isTextDoc(doc) && viewingTextId === doc.id && (
-          <div className="menu-text-view" role="region" aria-label={`Full menu: ${doc.file_name}`}>
-            <div className="menu-text-view-title">Menu details</div>
-            {viewingText.replace(/\r\n?/g, '\n').trim() || '(This menu is empty.)'}
-          </div>
-        )}
+          {isTextDoc(doc) && (
+            <div className="menu-text-view" role="region" aria-label={`Full menu: ${doc.file_name}`}>
+              <div className="menu-text-view-title">Menu details</div>
+              {loadingTextIds[doc.id] ? 'Loading menu…' : failedTextIds[doc.id] ? 'Menu text could not be loaded. Use Copy to try again.' : (textContents[doc.id] || '(This menu is empty.)').replace(/\r\n?/g, '\n').trim()}
+            </div>
+          )}
         </React.Fragment>
       ))}
     </div>
@@ -2507,7 +2522,7 @@ function App() {
           {selectedEvent && canViewSelectedEvent && !showNewWalk && (
             <React.Fragment>
               <div className="walk-section-nav" style={{display:'flex',flexWrap:'wrap',gap:8,marginBottom:14}}>
-                {[['details','Walk Details'],['route','Route & Map'],['attendance','Attendance'],['lunch','Lunch'],['documents','Documents'],['pub_menu','Pub Menu'],['report','Walk Report']].map(([key,label]) => (
+                {[['details','Walk Details'],['route','Route & Map'],['attendance','Attendance'],['lunch_menu','Lunch & Pub Menu'],['documents','Documents'],['report','Walk Report']].map(([key,label]) => (
                   <button key={key} className={'btn small ' + (selectedWalkSection === key ? '' : 'secondary')} onClick={() => { setSelectedWalkSection(key); if (key !== 'attendance') setWhosInOpen(false); }}>
                     {label}
                   </button>
@@ -2585,15 +2600,36 @@ function App() {
               </div>
               )}
 
-              {selectedWalkSection === 'lunch' && (
+              {selectedWalkSection === 'lunch_menu' && (
               <div className="card">
+                <div className="eyebrow">Lunch venue</div>
                 {selectedEvent.lunch_name ? (
                   <div className="lunch-chip">
-                    🍴 Lunch: {toMapsLink(selectedEvent.lunch_url) ? (
+                    🍴 Pub: {toMapsLink(selectedEvent.lunch_url) ? (
                       <a href={toMapsLink(selectedEvent.lunch_url)} target="_blank" rel="noopener noreferrer">{selectedEvent.lunch_name}</a>
                     ) : selectedEvent.lunch_name}
                   </div>
                 ) : <div className="empty">No lunch venue has been added yet.</div>}
+                {selectedEvent.lunch_url && (
+                  <p className="walk-meta" style={{marginTop:8}}>
+                    📍 Location: {/^https?:\/\//i.test(selectedEvent.lunch_url.trim()) ? (
+                      <a href={toMapsLink(selectedEvent.lunch_url)} target="_blank" rel="noopener noreferrer">Open pub location</a>
+                    ) : (
+                      <><a href={toMapsLink(selectedEvent.lunch_url)} target="_blank" rel="noopener noreferrer">{selectedEvent.lunch_url}</a> · <a href={toMapsLink(selectedEvent.lunch_url)} target="_blank" rel="noopener noreferrer">Directions</a></>
+                    )}
+                  </p>
+                )}
+                <div className="divider" style={{margin:'18px 0', borderTop:'1px solid var(--line)'}}></div>
+                <DocumentsSection
+                  title="Food choices / pub menu"
+                  allowText
+                  onSaveText={(file) => uploadDocument(file, { event_id: selectedEvent.id, category: 'pub_menu' }, () => loadEventDocuments(selectedEvent.id))}
+                  docs={eventDocuments.filter(d => d.category === 'pub_menu')}
+                  canEdit={isOrganiserOfSelected}
+                  uploading={uploadingDoc}
+                  onUpload={(file) => uploadDocument(file, { event_id: selectedEvent.id, category: 'pub_menu' }, () => loadEventDocuments(selectedEvent.id))}
+                  onDelete={(doc) => deleteDocument(doc, () => loadEventDocuments(selectedEvent.id))}
+                />
               </div>
               )}
 
@@ -2610,20 +2646,6 @@ function App() {
               </div>
               )}
 
-              {selectedWalkSection === 'pub_menu' && (
-              <div className="card">
-                <DocumentsSection
-                  title="Pub menu"
-                  allowText
-                  onSaveText={(file) => uploadDocument(file, { event_id: selectedEvent.id, category: 'pub_menu' }, () => loadEventDocuments(selectedEvent.id))}
-                  docs={eventDocuments.filter(d => d.category === 'pub_menu')}
-                  canEdit={isOrganiserOfSelected}
-                  uploading={uploadingDoc}
-                  onUpload={(file) => uploadDocument(file, { event_id: selectedEvent.id, category: 'pub_menu' }, () => loadEventDocuments(selectedEvent.id))}
-                  onDelete={(doc) => deleteDocument(doc, () => loadEventDocuments(selectedEvent.id))}
-                />
-              </div>
-              )}
 
               {selectedWalkSection === 'report' && (
               <div className="card">
@@ -2814,7 +2836,7 @@ function App() {
               </div>
 
               <div className="field">
-                <label>Lunch location (optional, usually the pub)</label>
+                <label>Lunch venue — pub name and location</label>
                 <input type="text" placeholder="e.g. The Red Lion" value={form.lunch_name} onChange={e => setForm({ ...form, lunch_name: e.target.value })} style={{marginBottom:8}} />
                 <input type="text" placeholder="Postcode, place name, or a Maps URL" value={form.lunch_url} onChange={e => setForm({ ...form, lunch_url: e.target.value })} />
               </div>
@@ -2833,7 +2855,7 @@ function App() {
               {editingWalk && selectedEvent && (
                 <div className="field">
                   <DocumentsSection
-                    title="Pub menu"
+                    title="Food choices / pub menu"
                     allowText
                     onSaveText={(file) => uploadDocument(file, { event_id: selectedEvent.id, category: 'pub_menu' }, () => loadEventDocuments(selectedEvent.id))}
                     docs={eventDocuments.filter(d => d.category === 'pub_menu')}
@@ -2966,7 +2988,7 @@ function App() {
           {editingTrip && selectedTrip && (
             <div className="field">
               <DocumentsSection
-                title="Pub menu"
+                title="Food choices / pub menu"
                 allowText
                 onSaveText={(file) => uploadDocument(file, { trip_id: selectedTrip.id, category: 'pub_menu' }, () => loadTripDetail(selectedTrip.id))}
                 docs={tripDocuments.filter(d => d.level_id == null && d.category === 'pub_menu')}
