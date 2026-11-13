@@ -745,7 +745,31 @@ function CompassMark() {
   );
 }
 
-function DocumentsSection({ title, docs, onUpload, onDelete, canEdit, uploading }) {
+function DocumentsSection({ title, docs, onUpload, onDelete, canEdit, uploading, allowText=false, onSaveText }) {
+  const [textDraft, setTextDraft] = useState('');
+  const [savingText, setSavingText] = useState(false);
+  const copyTextFile = async (doc) => {
+    try {
+      const response = await fetch(doc.file_url);
+      if (!response.ok) throw new Error('Could not read text file');
+      const text = await response.text();
+      if (navigator.clipboard && navigator.clipboard.writeText) await navigator.clipboard.writeText(text);
+      else {
+        const area = document.createElement('textarea'); area.value = text; document.body.appendChild(area);
+        area.select(); document.execCommand('copy'); area.remove();
+      }
+      alert('Text copied to clipboard');
+    } catch (err) { alert('Could not copy this text. Open the file and copy it manually.'); }
+  };
+  const saveText = async () => {
+    const value = textDraft.trim();
+    if (!value || !onSaveText) return;
+    setSavingText(true);
+    try {
+      await onSaveText(new File([value], `Pub menu ${new Date().toISOString().slice(0,10)}.txt`, { type: 'text/plain' }));
+      setTextDraft('');
+    } finally { setSavingText(false); }
+  };
   return (
     <div>
       <div className="row-between">
@@ -758,14 +782,25 @@ function DocumentsSection({ title, docs, onUpload, onDelete, canEdit, uploading 
           </label>
         )}
       </div>
+      {allowText && canEdit && (
+        <div style={{marginTop:12, padding:12, background:'var(--sage-soft)', borderRadius:10}}>
+          <label style={{display:'block', fontWeight:600, marginBottom:6}}>Paste or type menu text</label>
+          <textarea rows="6" value={textDraft} onChange={e => setTextDraft(e.target.value)} placeholder="Paste the pub's food or drinks menu here…" style={{width:'100%', boxSizing:'border-box'}} />
+          <button type="button" className="btn small primary" disabled={!textDraft.trim() || savingText || uploading} onClick={saveText} style={{marginTop:8}}>
+            {savingText || uploading ? 'Saving…' : 'Save menu text'}
+          </button>
+          <div style={{fontSize:12, color:'var(--muted)', marginTop:6}}>Saved as a text document that everyone can open and copy.</div>
+        </div>
+      )}
       {docs.length === 0 && <div className="empty">No documents yet.</div>}
       {docs.map(doc => (
         <div className="doc-row" key={doc.id}>
-          <div className="doc-icon">📘</div>
+          <div className="doc-icon">{doc.content_type === 'text/plain' || (doc.file_name || '').toLowerCase().endsWith('.txt') ? '📝' : '📘'}</div>
           <div className="doc-info">
             <div className="doc-name">{doc.file_name}</div>
             <div className="doc-meta">{fmtFileSize(doc.file_size)}{doc.uploaded_by ? ` · added by ${doc.uploaded_by}` : ''}</div>
           </div>
+          {(doc.content_type === 'text/plain' || (doc.file_name || '').toLowerCase().endsWith('.txt')) && <button type="button" className="doc-action doc-action-btn" onClick={() => copyTextFile(doc)} title="Copy text">Copy</button>}
           <a className="doc-action" href={doc.file_url} target="_blank" rel="noopener noreferrer" title="Open / download">📤</a>
           {canEdit && <button className="doc-action doc-action-btn" onClick={() => onDelete(doc)} title="Delete">✕</button>}
         </div>
@@ -2551,6 +2586,8 @@ function App() {
               <div className="card">
                 <DocumentsSection
                   title="Pub menu"
+                  allowText
+                  onSaveText={(file) => uploadDocument(file, { event_id: selectedEvent.id, category: 'pub_menu' }, () => loadEventDocuments(selectedEvent.id))}
                   docs={eventDocuments.filter(d => d.category === 'pub_menu')}
                   canEdit={isOrganiserOfSelected}
                   uploading={uploadingDoc}
@@ -2769,6 +2806,8 @@ function App() {
                 <div className="field">
                   <DocumentsSection
                     title="Pub menu"
+                    allowText
+                    onSaveText={(file) => uploadDocument(file, { event_id: selectedEvent.id, category: 'pub_menu' }, () => loadEventDocuments(selectedEvent.id))}
                     docs={eventDocuments.filter(d => d.category === 'pub_menu')}
                     canEdit={isOrganiserOfSelected}
                     uploading={uploadingDoc}
@@ -2900,6 +2939,8 @@ function App() {
             <div className="field">
               <DocumentsSection
                 title="Pub menu"
+                allowText
+                onSaveText={(file) => uploadDocument(file, { trip_id: selectedTrip.id, category: 'pub_menu' }, () => loadTripDetail(selectedTrip.id))}
                 docs={tripDocuments.filter(d => d.level_id == null && d.category === 'pub_menu')}
                 canEdit={isTripOrganiser}
                 uploading={uploadingDoc}
@@ -3549,6 +3590,8 @@ function App() {
               <div style={{marginTop:10}}>
                 <DocumentsSection
                   title=""
+                  allowText
+                  onSaveText={(file) => uploadDocument(file, { trip_id: selectedTrip.id, category: 'pub_menu' }, () => loadTripDetail(selectedTrip.id))}
                   docs={tripDocuments.filter(d => d.level_id == null && d.category === 'pub_menu')}
                   canEdit={isTripOrganiser}
                   uploading={uploadingDoc}
