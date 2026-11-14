@@ -1,0 +1,31 @@
+{
+  "id": "./cos.html",
+  "name": "COS",
+  "short_name": "COS",
+  "description": "UK route map: plot, follow and record routes",
+  "start_url": "./cos.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#1f5d43",
+  "theme_color": "#1f5d43",
+  "icons": [
+    {
+      "src": "cos-icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "cos-icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "cos-icon-512-maskable.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}
