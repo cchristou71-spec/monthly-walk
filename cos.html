@@ -350,8 +350,9 @@ function pick(lat,lon,name,box){
   c.append(t,b);
   pin=L.circleMarker([lat,lon],{radius:10,color:'#fff',weight:3,fillColor:'#c2255c',fillOpacity:1}).addTo(map).bindPopup(c).openPopup();
 }
-function showRes(items,note){
+function showRes(items,note,title){
   res.innerHTML='';
+  if(title&&items.length){const t=document.createElement('div');t.style.cssText='padding:8px 12px;font-size:13px;font-weight:600;background:#f6f4ee';t.textContent=title;res.append(t)}
   if(!items.length&&!note){toast('Nothing found');return closeRes()}
   items.forEach(i=>{const b=document.createElement('button');b.innerHTML='<span></span><small></small>';b.firstChild.textContent=i.name;b.lastChild.textContent=i.sub;b.onclick=()=>pick(i.lat,i.lon,i.name,i.box);res.append(b)});
   if(note){const n=document.createElement('div');n.style.cssText='padding:8px 12px;font-size:12px;color:#6b7068';n.textContent=note;res.append(n)}
@@ -419,24 +420,33 @@ async function findPubs(){
   }else c=await centre();
   if(!c)return;
   showRes([],'Searching for pubs…');
-  dbg=[];let items=[],failed=false;
+  dbg=[];let items=[],failed=false,title='';
   const rx=name.replace(/[.*+?^${}()|[\]\\]/g,'\\$&').replace(/\\/g,'\\\\').replace(/"/g,'\\"');
   const filt=name?'["name"~"'+rx+'",i]':'["name"]';
-  const ask=async m=>(await overpass('[out:json][timeout:12];nwr["amenity"="pub"]'+filt+'(around:'+m+','+c.lat+','+c.lng+');out center 80;')).map(e=>pubItem(e,c)).sort(byDist).slice(0,25);
+  const ask=async m=>(await overpass('[out:json][timeout:12];nwr["amenity"="pub"]'+filt+'(around:'+m+','+c.lat+','+c.lng+');out center;')).map(e=>pubItem(e,c)).sort(byDist).slice(0,25);
   try{
-    items=await ask(name?15000:4000);
-    if(!items.length&&!name)items=await ask(10000);
+    items=await ask(name?15000:4000);title=name?'Matches within 9 miles, nearest first':'Pubs within 2.5 miles, nearest first';
+    if(!items.length&&!name){items=await ask(10000);title='Pubs within 6 miles, nearest first'}
   }catch(e){failed=true}
   if(!items.length){
     try{
-      const extra=name?'':'&bounded=1&viewbox='+[c.lng-.12,c.lat+.09,c.lng+.12,c.lat-.09].join(',');
-      items=(await nom({text:name?name+(at?' '+at:''):'pub',limit:name?6:20,extra})).map(x=>{const i=place(x);if(!name){i.d=c.distanceTo([i.lat,i.lon]);i.sub=(i.sub?i.sub+' · ':'')+(i.d/1609.344).toFixed(1)+' mi away'}return i});
-      if(!name)items.sort(byDist);
+      if(name){
+        items=(await nom({text:name+(at?' '+at:''),limit:6})).map(place);title='Closest matches found';
+      }else{
+        const seen=new Set();let all=[];
+        for(const [dx,dy] of [[.05,.035],[.12,.09]]){
+          const r=await nom({text:'pub',limit:40,extra:'&bounded=1&viewbox='+[c.lng-dx,c.lat+dy,c.lng+dx,c.lat-dy].join(',')});
+          r.forEach(x=>{const k=x.place_id||x.osm_id;if(!seen.has(k)){seen.add(k);all.push(x)}});
+          if(all.length>=8)break;
+        }
+        items=all.map(x=>{const i=place(x);i.d=c.distanceTo([i.lat,i.lon]);i.sub=(i.sub?i.sub+' · ':'')+(i.d/1609.344).toFixed(1)+' mi away';return i}).sort(byDist).slice(0,25);
+        title='Pubs found nearby, nearest first';
+      }
       failed=false;dbg.push('search: '+items.length);
     }catch(e){dbg.push('search: '+(e&&e.message||e))}
   }
-  const note='v8 · '+items.length+' found near '+c.lat.toFixed(3)+', '+c.lng.toFixed(3)+' · '+dbg.join(' · ');
-  showRes(items,(failed&&!items.length?'The pub service is busy. Try again in a minute. ':'')+note);
+  const note='v9 · '+items.length+' found near '+c.lat.toFixed(3)+', '+c.lng.toFixed(3)+' · '+dbg.join(' · ');
+  showRes(items,(failed&&!items.length?'The pub service is busy. Try again in a minute. ':'')+note,title);
 }
 $('pubs').onclick=findPubs;
 ['q','area'].forEach(id=>$(id).onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();findPubs()}else if(e.key==='Escape')closeRes()});
