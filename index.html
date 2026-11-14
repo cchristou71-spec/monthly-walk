@@ -639,6 +639,58 @@ function MapControls({ mapStyle, setMapStyle, locationOn, toggleLocation, expand
   );
 }
 
+// ---- COS route map integration ----
+// COS (cos.html) sits next to this file. "Open in COS" hands the route across
+// via localStorage (same site), and COS shares routes to the cos_routes table.
+const COS_URL = 'cos.html#open';
+function openInCos(gpx, name) {
+  try { localStorage.setItem('cos_open', JSON.stringify({ gpx, name: name || 'Route', t: Date.now() })); } catch (e) {}
+}
+
+function CosRoutePicker({ onPick }) {
+  const [open, setOpen] = useState(false);
+  const [routes, setRoutes] = useState(null);
+  const [err, setErr] = useState('');
+  const [busyId, setBusyId] = useState(null);
+
+  const toggle = async () => {
+    const next = !open;
+    setOpen(next);
+    if (!next) return;
+    setErr('');
+    const { data, error } = await sb.from('cos_routes').select('id,name,distance_m,created_at').order('created_at', { ascending: false }).limit(50);
+    if (error) { setErr('Could not load routes. Check your connection.'); return; }
+    setRoutes(data || []);
+  };
+
+  const choose = async (r) => {
+    setBusyId(r.id);
+    const { data, error } = await sb.from('cos_routes').select('gpx,name,distance_m').eq('id', r.id).single();
+    setBusyId(null);
+    if (error || !data) { setErr('Could not load that route. Try again.'); return; }
+    onPick(data.gpx, (data.name || 'Route') + '.gpx', data.distance_m);
+    setOpen(false);
+  };
+
+  return (
+    <div style={{ marginTop: 8 }}>
+      <button type="button" className="btn secondary small" onClick={toggle}>🗺️ Choose from COS routes</button>
+      {open && (
+        <div style={{ marginTop: 8 }}>
+          {err && <p style={{ fontSize: 13, color: '#b3382c', margin: '4px 0' }}>{err}</p>}
+          {!err && routes === null && <p style={{ fontSize: 13, color: '#8a9089', margin: '4px 0' }}>Loading…</p>}
+          {!err && routes && routes.length === 0 && <p style={{ fontSize: 13, color: '#8a9089', margin: '4px 0' }}>No routes shared yet. In COS, tap "Share to HDSG" on a route.</p>}
+          {routes && routes.map(r => (
+            <button type="button" key={r.id} className="btn secondary full" style={{ textAlign: 'left', marginTop: 6 }} disabled={busyId === r.id} onClick={() => choose(r)}>
+              {r.name}{r.distance_m ? ' — ' + (r.distance_m / 1609.344).toFixed(1) + ' miles' : ''}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function RouteMap({ gpxContent }) {
   const containerRef = useRef(null);
   const mapRef = useRef(null);
@@ -1872,6 +1924,22 @@ function App() {
 
   const clearLevelGpx = () => setLevelForm(f => ({ ...f, gpx_content: '', gpx_filename: '' }));
 
+  const applyCosRouteToLevel = (text, name, distM) => {
+    const points = parseGpxPoints(text);
+    if (points.length === 0) { flashToast('Could not read that route'); return; }
+    setLevelForm(f => ({
+      ...f,
+      gpx_content: text,
+      gpx_filename: name,
+      distance_miles: (f.distance_miles === '' || f.distance_miles == null) && distM ? (distM / 1609.344).toFixed(1) : f.distance_miles,
+      start_lat: f.start_lat === '' ? points[0].lat : f.start_lat,
+      start_lng: f.start_lng === '' ? points[0].lng : f.start_lng,
+      end_lat: f.end_lat === '' ? points[points.length - 1].lat : f.end_lat,
+      end_lng: f.end_lng === '' ? points[points.length - 1].lng : f.end_lng,
+    }));
+    flashToast('Route added');
+  };
+
   const saveLevelForm = async (levelId) => {
     if (!levelForm.title.trim()) { flashToast('Give it a title'); return; }
     const isNonWalking = levelForm.walk_type === 'Non Walking Option';
@@ -2323,6 +2391,21 @@ function App() {
 
   const clearGpx = () => setForm(f => ({ ...f, gpx_content: '', gpx_filename: '' }));
 
+  const applyCosRoute = (text, name) => {
+    const points = parseGpxPoints(text);
+    if (points.length === 0) { flashToast('Could not read that route'); return; }
+    setForm(f => ({
+      ...f,
+      gpx_content: text,
+      gpx_filename: name,
+      start_lat: f.start_lat === '' ? points[0].lat : f.start_lat,
+      start_lng: f.start_lng === '' ? points[0].lng : f.start_lng,
+      end_lat: f.end_lat === '' ? points[points.length - 1].lat : f.end_lat,
+      end_lng: f.end_lng === '' ? points[points.length - 1].lng : f.end_lng,
+    }));
+    flashToast('Route added');
+  };
+
   const toggleFormOrganiser = (name) => {
     setForm(f => {
       const has = f.organisers.includes(name);
@@ -2577,6 +2660,11 @@ function App() {
                         📥 Download GPX
                       </a>
                     )}
+                    {selectedEvent.gpx_content && (
+                      <a className="link-chip" href={COS_URL} onClick={() => openInCos(selectedEvent.gpx_content, selectedEvent.gpx_filename)}>
+                        🗺️ Open in COS
+                      </a>
+                    )}
                     {selectedEvent.start_lat != null && selectedEvent.start_lng != null && (
                       <a className="link-chip" target="_blank" rel="noopener noreferrer"
                         href={`https://www.google.com/maps?q=${selectedEvent.start_lat},${selectedEvent.start_lng}`}>
@@ -2814,7 +2902,7 @@ function App() {
                     <button onClick={clearGpx}>Remove</button>
                   </div>
                 ) : (
-                  <input type="file" accept=".gpx" onChange={handleGpxFile} />
+                  <React.Fragment><input type="file" accept=".gpx" onChange={handleGpxFile} /><CosRoutePicker onPick={applyCosRoute} /></React.Fragment>
                 )}
                 <p style={{fontSize:12, color:'#8a9089', margin:'6px 0 0'}}>Upload a GPX track and everyone opening this walk will see it on a map.</p>
               </div>
@@ -3158,7 +3246,7 @@ function App() {
                             <button onClick={clearLevelGpx}>Remove</button>
                           </div>
                         ) : (
-                          <input type="file" accept=".gpx" onChange={handleLevelGpxFile} />
+                          <React.Fragment><input type="file" accept=".gpx" onChange={handleLevelGpxFile} /><CosRoutePicker onPick={applyCosRouteToLevel} /></React.Fragment>
                         )}
                       </div>
                       <div className="field">
@@ -3260,7 +3348,7 @@ function App() {
                             <button onClick={clearLevelGpx}>Remove</button>
                           </div>
                         ) : (
-                          <input type="file" accept=".gpx" onChange={handleLevelGpxFile} />
+                          <React.Fragment><input type="file" accept=".gpx" onChange={handleLevelGpxFile} /><CosRoutePicker onPick={applyCosRouteToLevel} /></React.Fragment>
                         )}
                       </div>
                       <div className="field">
@@ -3766,7 +3854,7 @@ function App() {
                               <button onClick={clearLevelGpx}>Remove</button>
                             </div>
                           ) : (
-                            <input type="file" accept=".gpx" onChange={handleLevelGpxFile} />
+                            <React.Fragment><input type="file" accept=".gpx" onChange={handleLevelGpxFile} /><CosRoutePicker onPick={applyCosRouteToLevel} /></React.Fragment>
                           )}
                         </div>
                         <div className="field">
@@ -3808,6 +3896,9 @@ function App() {
                       <div className="route-links">
                         {selectedLevel.gpx_content && (
                           <a className="link-chip" href={gpxDownloadHref(selectedLevel.gpx_content)} download={selectedLevel.gpx_filename || 'route.gpx'}>📥 Download GPX</a>
+                        )}
+                        {selectedLevel.gpx_content && (
+                          <a className="link-chip" href={COS_URL} onClick={() => openInCos(selectedLevel.gpx_content, selectedLevel.gpx_filename)}>🗺️ Open in COS</a>
                         )}
                         {selectedLevel.start_lat != null && selectedLevel.start_lng != null && (
                           <a className="link-chip" target="_blank" rel="noopener noreferrer" href={`https://www.google.com/maps?q=${selectedLevel.start_lat},${selectedLevel.start_lng}`}>📍 Start</a>

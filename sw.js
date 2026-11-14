@@ -2,11 +2,12 @@
 //
 // Bump CACHE_VERSION any time you deploy a meaningful update, so returning
 // visitors pick up the new files instead of a stale cached copy.
-const CACHE_VERSION = 'hdsg-walks-v1';
+const CACHE_VERSION = 'hdsg-walks-v2';
 
 const PRECACHE_URLS = [
   './',
   './manifest.json',
+  './cos.html',
   './favicon-32.png',
   './icon-192.png',
   './icon-180.png',
