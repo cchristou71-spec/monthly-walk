@@ -361,9 +361,21 @@ async function centre(){
   toast('Finding your location…');
   return new Promise(res=>navigator.geolocation?navigator.geolocation.getCurrentPosition(p=>{map.setView(showMe(p),14);res(map.getCenter())},()=>{toast('Allow location, or zoom in to your area first');res(null)},{timeout:8000,maximumAge:60000}):res(null));
 }
+const OPS=['https://overpass-api.de/api/interpreter','https://overpass.kumi.systems/api/interpreter','https://overpass.private.coffee/api/interpreter'];
 async function overpass(q){
-  const r=await fetch('https://overpass-api.de/api/interpreter',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'data='+encodeURIComponent(q)});
-  return (await r.json()).elements||[];
+  let last;
+  for(const u of OPS){
+    try{
+      const ctl=new AbortController(),t=setTimeout(()=>ctl.abort(),12000);
+      const r=await fetch(u,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'data='+encodeURIComponent(q),signal:ctl.signal});
+      clearTimeout(t);
+      if(!r.ok)throw new Error('HTTP '+r.status);
+      const j=await r.json();
+      if(j.remark&&!(j.elements&&j.elements.length)&&/error|timed out|memory/i.test(j.remark))throw new Error(j.remark);
+      return j.elements||[];
+    }catch(e){last=e}
+  }
+  throw last;
 }
 function pubItem(e,c){
   const la=e.lat!=null?e.lat:e.center.lat,lo=e.lon!=null?e.lon:e.center.lon,t=e.tags||{},d=c.distanceTo([la,lo]);
@@ -375,7 +387,7 @@ const place=x=>{
   const a=x.address||{},parts=x.display_name.split(', '),town=a.village||a.town||a.hamlet||a.suburb||a.city||'';
   return{name:x.name||parts[0],sub:[town,a.county||a.state_district||a.state||''].filter(Boolean).join(', ')||parts.slice(1,3).join(', '),lat:+x.lat,lon:+x.lon,box:['amenity','tourism','shop','leisure'].includes(x.class)?null:x.boundingbox.map(Number)};
 };
-const nom=async q=>(await(await fetch('https://nominatim.openstreetmap.org/search?format=json&addressdetails=1&countrycodes=gb&limit='+q.limit+'&q='+encodeURIComponent(q.text))).json());
+const nom=async q=>(await(await fetch('https://nominatim.openstreetmap.org/search?format=json&addressdetails=1&countrycodes=gb&limit='+q.limit+(q.extra||'')+'&q='+encodeURIComponent(q.text))).json());
 let areaDirty=false,areaT,autoKey='';
 $('area').oninput=()=>{areaDirty=$('area').value.trim()!==''};
 function autoArea(){
@@ -403,15 +415,22 @@ async function findPubs(){
   if(!c)return;
   toast(name?'Searching…':'Finding pubs…');
   let items=[],failed=false;
+  const rx=name.replace(/[.*+?^${}()|[\]\\]/g,'\\$&').replace(/\\/g,'\\\\').replace(/"/g,'\\"');
+  const filt=name?'["name"~"'+rx+'",i]':'["name"]';
+  const ask=async m=>(await overpass('[out:json][timeout:12];nwr["amenity"="pub"]'+filt+'(around:'+m+','+c.lat+','+c.lng+');out center 80;')).map(e=>pubItem(e,c)).sort(byDist).slice(0,25);
   try{
-    const rx=name.replace(/[.*+?^${}()|[\]\\]/g,'\\$&').replace(/\\/g,'\\\\').replace(/"/g,'\\"');
-    const filt=name?'["name"~"'+rx+'",i]':'["name"]';
-    items=(await overpass('[out:json][timeout:15];nwr["amenity"="pub"]'+filt+'(around:'+(name?15000:4000)+','+c.lat+','+c.lng+');out center 80;')).map(e=>pubItem(e,c)).sort(byDist).slice(0,25);
+    items=await ask(name?15000:4000);
+    if(!items.length&&!name)items=await ask(10000);
   }catch(e){failed=true}
-  if(!items.length&&name){
-    try{items=(await nom({text:name+(at?' '+at:''),limit:6})).map(place);failed=false}catch(e){}
+  if(!items.length){
+    try{
+      const extra=name?'':'&bounded=1&viewbox='+[c.lng-.12,c.lat+.09,c.lng+.12,c.lat-.09].join(',');
+      items=(await nom({text:name?name+(at?' '+at:''):'pub',limit:name?6:20,extra})).map(x=>{const i=place(x);if(!name){i.d=c.distanceTo([i.lat,i.lon]);i.sub=(i.sub?i.sub+' · ':'')+(i.d/1609.344).toFixed(1)+' mi away'}return i});
+      if(!name)items.sort(byDist);
+      failed=false;
+    }catch(e){}
   }
-  if(failed&&!items.length)return toast('Could not load pubs. Try again in a moment.');
+  if(failed&&!items.length)return toast('The pub service is busy. Please try again in a minute.');
   showRes(items);
 }
 $('pubs').onclick=findPubs;
