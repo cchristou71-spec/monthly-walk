@@ -2661,7 +2661,7 @@ function App() {
                       </a>
                     )}
                     {selectedEvent.gpx_content && (
-                      <a className="link-chip" href={COS_URL} onClick={() => openInCos(selectedEvent.gpx_content, selectedEvent.gpx_filename)}>
+                      <a className="link-chip" href={'cos.html#walk=' + selectedEvent.id} onClick={() => openInCos(selectedEvent.gpx_content, selectedEvent.gpx_filename)}>
                         🗺️ Open in COS
                       </a>
                     )}
@@ -3898,7 +3898,7 @@ function App() {
                           <a className="link-chip" href={gpxDownloadHref(selectedLevel.gpx_content)} download={selectedLevel.gpx_filename || 'route.gpx'}>📥 Download GPX</a>
                         )}
                         {selectedLevel.gpx_content && (
-                          <a className="link-chip" href={COS_URL} onClick={() => openInCos(selectedLevel.gpx_content, selectedLevel.gpx_filename)}>🗺️ Open in COS</a>
+                          <a className="link-chip" href={'cos.html#level=' + selectedLevel.id} onClick={() => openInCos(selectedLevel.gpx_content, selectedLevel.gpx_filename)}>🗺️ Open in COS</a>
                         )}
                         {selectedLevel.start_lat != null && selectedLevel.start_lng != null && (
                           <a className="link-chip" target="_blank" rel="noopener noreferrer" href={`https://www.google.com/maps?q=${selectedLevel.start_lat},${selectedLevel.start_lng}`}>📍 Start</a>

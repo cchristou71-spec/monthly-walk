@@ -76,14 +76,14 @@ button:focus-visible,input:focus-visible,.tab:focus-visible{outline:3px solid #1
 
   <div class="pane" id="p-plot">
     <div class="row" id="modes">
-      <button data-m="straight" class="on">Straight</button><button data-m="foot">Walk</button><button data-m="bike">Cycle</button><button data-m="car">Drive</button>
+      <button data-m="straight">Straight</button><button data-m="foot" class="on">Walk</button><button data-m="bike">Cycle</button><button data-m="car">Drive</button>
     </div>
     <div class="row">
-      <span class="big" id="pd">0.00 km</span>
+      <span class="big" id="pd">0.00 mi</span>
       <button id="undo">Undo</button><button id="clr">Clear</button><button id="sv">Save</button><button id="ex">Export GPX</button><button id="sh">Share to HDSG</button>
     </div>
     <div class="row"><button id="dl">Save this map area offline</button><span class="m" id="dls"></span></div>
-    <p class="m">Tap the map to add points and drag a point to adjust it. Walk, Cycle and Drive snap each leg to paths or roads.</p>
+    <p class="m">Tap the map to add points and drag a point to adjust it. Walk, Cycle and Drive snap points and legs to nearby paths or roads.</p>
   </div>
 
   <div class="pane" id="p-follow" hidden>
@@ -94,7 +94,7 @@ button:focus-visible,input:focus-visible,.tab:focus-visible{outline:3px solid #1
 
   <div class="pane" id="p-record" hidden>
     <div class="row"><button id="rb" class="go">Start recording</button><span class="m">Keep the screen on while recording.</span></div>
-    <div class="stat"><div><b id="rd">0.00 km</b><span>Distance</span></div><div><b id="rtm">0:00:00</b><span>Time</span></div><div><b id="ra">0 m</b><span>Ascent</span></div></div>
+    <div class="stat"><div><b id="rd">0.00 mi</b><span>Distance</span></div><div><b id="rtm">0:00:00</b><span>Time</span></div><div><b id="ra">0 ft</b><span>Ascent</span></div></div>
   </div>
 
   <div class="pane" id="p-saved" hidden>
@@ -107,7 +107,7 @@ button:focus-visible,input:focus-visible,.tab:focus-visible{outline:3px solid #1
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script>
 const $=i=>document.getElementById(i);
-const km=m=>(m/1000).toFixed(2)+' km';
+const mi=m=>(m/1609.344).toFixed(2)+' mi';
 let tt;function toast(s){const t=$('toast');t.textContent=s;t.classList.add('on');clearTimeout(tt);tt=setTimeout(()=>t.classList.remove('on'),3500)}
 
 /* ---------- HDSG Walks link (shared Supabase project) ---------- */
@@ -150,11 +150,11 @@ function tabTo(t){tab=t;document.querySelectorAll('.tab').forEach(b=>b.classList
 document.querySelectorAll('.tab').forEach(b=>b.onclick=()=>tabTo(b.dataset.t));
 
 /* ---------- plot ---------- */
-let wps=[],loaded=null,mode='straight';
+let wps=[],loaded=null,mode='foot';
 const line=L.polyline([],{color:'#d9480f',weight:5,opacity:.9}).addTo(map);
 const path=()=>loaded||wps.flatMap(w=>w.seg);
 const dist=p=>p.reduce((s,q,i)=>i?s+L.latLng(p[i-1]).distanceTo(L.latLng(q)):0,0);
-const redraw=()=>{const p=path();line.setLatLngs(p);$('pd').textContent=km(dist(p))};
+const redraw=()=>{const p=path();line.setLatLngs(p);$('pd').textContent=mi(dist(p))};
 
 async function seg(w){
   const i=wps.indexOf(w);
@@ -168,11 +168,23 @@ async function seg(w){
     if(j.routes&&j.routes[0])w.seg=j.routes[0].geometry.coordinates.map(c=>[c[1],c[0]]);else throw 0;
   }catch(e){toast('Could not snap that leg, so it is a straight line')}
 }
-async function addWp(ll){
+async function snapPt(ll){
+  if(mode==='straight')return ll;
+  try{
+    const r=await fetch(`https://routing.openstreetmap.de/routed-${mode}/nearest/v1/driving/${ll.lng},${ll.lat}?number=1`);
+    const j=await r.json(),w=j.waypoints&&j.waypoints[0];
+    if(w&&w.distance<=40)return L.latLng(w.location[1],w.location[0]);
+  }catch(e){}
+  return ll;
+}
+let addQ=Promise.resolve();
+const addWp=ll=>{addQ=addQ.then(()=>add1(ll));return addQ};
+async function add1(ll){
   if(loaded){loaded=null;toast('Loaded route cleared. New route started.')}
+  ll=await snapPt(ll);
   const m=L.marker(ll,{draggable:true,icon:L.divIcon({className:'wp',iconSize:[16,16]})}).addTo(map);
   const w={ll,m,seg:[]};wps.push(w);
-  m.on('dragend',async()=>{w.ll=m.getLatLng();await seg(w);const n=wps[wps.indexOf(w)+1];if(n)await seg(n);redraw()});
+  m.on('dragend',async()=>{w.ll=await snapPt(m.getLatLng());m.setLatLng(w.ll);await seg(w);const n=wps[wps.indexOf(w)+1];if(n)await seg(n);redraw()});
   await seg(w);redraw();
 }
 function clearPlan(){wps.forEach(w=>map.removeLayer(w.m));wps=[];loaded=null;redraw()}
@@ -212,7 +224,7 @@ function list(){
     const d=document.createElement('div');d.className='it';
     d.innerHTML='<b></b><span class="m"></span><div><button>Show</button><button>Follow</button><button>Export GPX</button><button>Share to HDSG</button><button>Delete</button></div>';
     d.querySelector('b').textContent=r.name;
-    d.querySelector('span').textContent=(r.type==='track'?'Recorded':'Planned')+', '+km(r.dist)+', '+new Date(r.date).toLocaleDateString('en-GB');
+    d.querySelector('span').textContent=(r.type==='track'?'Recorded':'Planned')+', '+mi(r.dist)+', '+new Date(r.date).toLocaleDateString('en-GB');
     const [s,f,g,sb2,x]=d.querySelectorAll('button');
     s.onclick=()=>{show(r);tabTo('plot')};
     f.onclick=()=>{show(r);tabTo('follow')};
@@ -270,7 +282,7 @@ $('fb').onclick=()=>{
   fw=navigator.geolocation.watchPosition(p=>{
     const ll=showMe(p);if($('ac').checked)map.panTo(ll);
     const r=snapTo(ll),b=$('fs').querySelectorAll('b');
-    b[0].textContent=km(r.done);b[1].textContent=km(Math.max(0,tot-r.done));b[2].textContent=Math.round(r.off)+' m';
+    b[0].textContent=mi(r.done);b[1].textContent=mi(Math.max(0,tot-r.done));b[2].textContent=Math.round(r.off*3.28084)+' ft';
     $('fo').classList.toggle('off',r.off>40);
   },gerr,{enableHighAccuracy:true,maximumAge:2000});
   $('fb').textContent='Stop following';$('fb').className='stop';wake();
@@ -279,7 +291,7 @@ $('fb').onclick=()=>{
 /* ---------- record ---------- */
 const rline=L.polyline([],{color:'#c2255c',weight:5}).addTo(map);
 let rw=null,rec=[],rt0=0,rtick=null,asc=0,lastEle=null,rdist=0;
-const upd=()=>{$('rd').textContent=km(rdist);const s=rw!=null?Math.floor((Date.now()-rt0)/1000):0;$('rtm').textContent=Math.floor(s/3600)+':'+String(Math.floor(s/60)%60).padStart(2,'0')+':'+String(s%60).padStart(2,'0');$('ra').textContent=Math.round(asc)+' m'};
+const upd=()=>{$('rd').textContent=mi(rdist);const s=rw!=null?Math.floor((Date.now()-rt0)/1000):0;$('rtm').textContent=Math.floor(s/3600)+':'+String(Math.floor(s/60)%60).padStart(2,'0')+':'+String(s%60).padStart(2,'0');$('ra').textContent=Math.round(asc*3.28084)+' ft'};
 function stopRec(){
   navigator.geolocation.clearWatch(rw);rw=null;clearInterval(rtick);
   $('rb').textContent='Start recording';$('rb').className='go';unwake();
@@ -364,14 +376,27 @@ $('pubs').onclick=async()=>{
       return{name:t.name,sub:[t['addr:street'],t['addr:city']||t['addr:village']||t['addr:postcode']].filter(Boolean).join(', ')||'Pub',lat:la,lon:lo,box:null,d:c.distanceTo([la,lo])}}).sort((a,b)=>a.d-b.d).slice(0,25));
   }catch(e){toast('Could not load pubs. Try again in a moment.')}
 };
-/* route handed over from HDSG Walks ("Open in COS") */
-try{
-  const o=JSON.parse(localStorage.getItem('cos_open')||'null');localStorage.removeItem('cos_open');
-  if(o&&o.gpx&&Date.now()-o.t<60000){
+/* startup: open a route from HDSG Walks, otherwise centre on my location */
+async function openFromHdsg(kind,id){
+  const t=kind==='walk'?'walk_events':'trip_day_levels';
+  try{
+    const r=await fetch(`${SB_URL}/rest/v1/${t}?id=eq.${encodeURIComponent(id)}&select=gpx_content,gpx_filename`,{headers:{apikey:SB_KEY,Authorization:'Bearer '+SB_KEY}});
+    const j=await r.json();
+    if(!j[0]||!j[0].gpx_content)throw 0;
+    return{gpx:j[0].gpx_content,name:(j[0].gpx_filename||'route').replace(/\.gpx$/i,'')};
+  }catch(e){return null}
+}
+(async()=>{
+  let o=null;const m=location.hash.match(/^#(walk|level)=([\w-]+)/);
+  if(m)o=await openFromHdsg(m[1],m[2]);
+  if(!o){try{const s=JSON.parse(localStorage.getItem('cos_open')||'null');if(s&&s.gpx&&Date.now()-s.t<60000)o={gpx:s.gpx,name:s.name}}catch(e){}}
+  try{localStorage.removeItem('cos_open')}catch(e){}
+  if(o){
     const r=parseGpx(o.gpx);
-    if(r.pts.length>1){loaded=r.pts;redraw();map.fitBounds(line.getBounds(),{padding:[40,40]});tabTo('follow');$('back').hidden=false;toast('Loaded '+(o.name||'route'))}
+    if(r.pts.length>1){loaded=r.pts;redraw();map.invalidateSize();map.fitBounds(line.getBounds(),{padding:[40,40]});tabTo('follow');$('back').hidden=false;toast('Loaded '+(o.name||'route'));return}
   }
-}catch(e){}
+  if(navigator.geolocation)navigator.geolocation.getCurrentPosition(p=>map.setView(showMe(p),14),()=>{},{enableHighAccuracy:false,timeout:10000,maximumAge:60000});
+})();
 list();
 </script>
 </body>
