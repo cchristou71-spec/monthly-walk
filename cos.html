@@ -411,27 +411,33 @@ function autoArea(){
 map.on('moveend',autoArea);
 async function findPubs(){
   const name=$('q').value.trim(),at=$('area').value.trim();
-  let c;
+  let c,where;
   if(areaDirty&&at){
     toast('Finding '+at+'…');
     let r;try{r=(await nom({text:at,limit:1}))[0]}catch(e){return toast('Search needs an internet connection')}
     if(!r)return toast('Could not find that area');
     c=L.latLng(+r.lat,+r.lon);map.setView(c,14);
-  }else c=await centre();
+    where=r.display_name.split(', ').slice(0,2).join(', ');
+  }else{c=await centre();where=at||'the map centre'}
   if(!c)return;
-  showRes([],'Searching for pubs…');
+  showRes([],'Searching for pubs near '+where+'…');
   dbg=[];let items=[],failed=false,title='';
-  const rx=name.replace(/[.*+?^${}()|[\]\\]/g,'\\$&').replace(/\\/g,'\\\\').replace(/"/g,'\\"');
-  const filt=name?'["name"~"'+rx+'",i]':'["name"]';
+  const esc=s=>s.replace(/[.*+?^${}()|[\]\\]/g,'\\$&').replace(/\\/g,'\\\\').replace(/"/g,'\\"');
+  const words=name.split(/\s+/).filter(w=>w.length>1&&!/^(the|and)$/i.test(w));
+  const filt=name?(words.length?words:[name]).map(w=>'["name"~"'+esc(w)+'",i]').join(''):'["name"]';
   const ask=async m=>(await overpass('[out:json][timeout:12];nwr["amenity"="pub"]'+filt+'(around:'+m+','+c.lat+','+c.lng+');out center;')).map(e=>pubItem(e,c)).sort(byDist).slice(0,25);
   try{
-    items=await ask(name?15000:4000);title=name?'Matches within 9 miles, nearest first':'Pubs within 2.5 miles, nearest first';
-    if(!items.length&&!name){items=await ask(10000);title='Pubs within 6 miles, nearest first'}
+    for(const [m,mi] of (name?[[10000,'6'],[25000,'15']]:[[4000,'2.5'],[10000,'6']])){
+      items=await ask(m);
+      if(items.length){title=(name?'Matches':'Pubs')+' within '+mi+' miles of '+where+', nearest first';break}
+    }
   }catch(e){failed=true}
   if(!items.length){
     try{
+      const far=x=>{const i=place(x);i.d=c.distanceTo([i.lat,i.lon]);i.sub=(i.sub?i.sub+' · ':'')+Math.round(i.d/1609.344)+' mi away';return i};
       if(name){
-        items=(await nom({text:name+(at?' '+at:''),limit:6})).map(place);title='Closest matches found';
+        items=(await nom({text:name+(at?' '+at:''),limit:8})).map(far).sort(byDist);
+        if(items.length)title='None within 15 miles of '+where+'. Closest matches elsewhere:';
       }else{
         const seen=new Set();let all=[];
         for(const [dx,dy] of [[.05,.035],[.12,.09]]){
@@ -439,14 +445,15 @@ async function findPubs(){
           r.forEach(x=>{const k=x.place_id||x.osm_id;if(!seen.has(k)){seen.add(k);all.push(x)}});
           if(all.length>=8)break;
         }
-        items=all.map(x=>{const i=place(x);i.d=c.distanceTo([i.lat,i.lon]);i.sub=(i.sub?i.sub+' · ':'')+(i.d/1609.344).toFixed(1)+' mi away';return i}).sort(byDist).slice(0,25);
-        title='Pubs found nearby, nearest first';
+        items=all.map(far).sort(byDist).slice(0,25);
+        title='Pubs found near '+where+', nearest first';
       }
       failed=false;dbg.push('search: '+items.length);
     }catch(e){dbg.push('search: '+(e&&e.message||e))}
   }
-  const note='v9 · '+items.length+' found near '+c.lat.toFixed(3)+', '+c.lng.toFixed(3)+' · '+dbg.join(' · ');
-  showRes(items,(failed&&!items.length?'The pub service is busy. Try again in a minute. ':'')+note,title);
+  const none=!items.length&&!failed?'Nothing found'+(name?' named "'+name+'"':'')+' near '+where+'. ':'';
+  const note=none+(failed&&!items.length?'The pub service is busy. Try again in a minute. ':'')+'v10 · '+items.length+' found near '+c.lat.toFixed(3)+', '+c.lng.toFixed(3)+' · '+dbg.join(' · ');
+  showRes(items,note,title);
 }
 $('pubs').onclick=findPubs;
 ['q','area'].forEach(id=>$(id).onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();findPubs()}else if(e.key==='Escape')closeRes()});
