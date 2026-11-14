@@ -365,20 +365,22 @@ async function centre(){
 const OPS=['https://overpass-api.de/api/interpreter','https://overpass.kumi.systems/api/interpreter','https://overpass.private.coffee/api/interpreter'];
 let dbg=[];
 async function overpass(q){
-  let last;
-  for(const u of OPS){
+  const one=async u=>{
+    const ctl=new AbortController(),t=setTimeout(()=>ctl.abort(),9000),nm=new URL(u).host.replace('overpass','op').replace('.systems','');
     try{
-      const ctl=new AbortController(),t=setTimeout(()=>ctl.abort(),12000);
       const r=await fetch(u,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'data='+encodeURIComponent(q),signal:ctl.signal});
-      clearTimeout(t);
       if(!r.ok)throw new Error('HTTP '+r.status);
       const j=await r.json();
-      if(j.remark&&!(j.elements&&j.elements.length)&&/error|timed out|memory/i.test(j.remark))throw new Error(j.remark);
-      dbg.push(new URL(u).host.replace('overpass','op').replace('.systems','')+': '+(j.elements||[]).length);
-      return j.elements||[];
-    }catch(e){last=e;dbg.push(new URL(u).host.replace('overpass','op').replace('.systems','')+': '+(e&&e.message||e))}
-  }
-  throw last;
+      if(j.remark&&!(j.elements&&j.elements.length)&&/error|timed out|memory/i.test(j.remark))throw new Error('busy');
+      dbg.push(nm+': '+(j.elements||[]).length);return j.elements||[];
+    }catch(e){dbg.push(nm+': '+(e.name==='AbortError'?'timeout':(e.message||e)));throw e}
+    finally{clearTimeout(t)}
+  };
+  return new Promise((resolve,reject)=>{
+    let left=OPS.length,ok=false,done=false;
+    const fin=()=>{if(done)return;if(--left===0){done=true;ok?resolve([]):reject(new Error('all servers failed'))}};
+    OPS.forEach(u=>one(u).then(es=>{ok=true;if(es.length&&!done){done=true;resolve(es)}else fin()},()=>fin()));
+  });
 }
 function pubItem(e,c){
   const la=e.lat!=null?e.lat:e.center.lat,lo=e.lon!=null?e.lon:e.center.lon,t=e.tags||{},d=c.distanceTo([la,lo]);
@@ -416,7 +418,7 @@ async function findPubs(){
     c=L.latLng(+r.lat,+r.lon);map.setView(c,14);
   }else c=await centre();
   if(!c)return;
-  toast(name?'Searching…':'Finding pubs…');
+  showRes([],'Searching for pubs…');
   dbg=[];let items=[],failed=false;
   const rx=name.replace(/[.*+?^${}()|[\]\\]/g,'\\$&').replace(/\\/g,'\\\\').replace(/"/g,'\\"');
   const filt=name?'["name"~"'+rx+'",i]':'["name"]';
@@ -433,7 +435,7 @@ async function findPubs(){
       failed=false;dbg.push('search: '+items.length);
     }catch(e){dbg.push('search: '+(e&&e.message||e))}
   }
-  const note='v7 · '+items.length+' found near '+c.lat.toFixed(3)+', '+c.lng.toFixed(3)+' · '+dbg.join(' · ');
+  const note='v8 · '+items.length+' found near '+c.lat.toFixed(3)+', '+c.lng.toFixed(3)+' · '+dbg.join(' · ');
   showRes(items,(failed&&!items.length?'The pub service is busy. Try again in a minute. ':'')+note);
 }
 $('pubs').onclick=findPubs;
