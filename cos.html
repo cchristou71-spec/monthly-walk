@@ -21,10 +21,13 @@ html,body{height:100%;margin:0}
 body{display:flex;flex-direction:column;font:15px/1.35 system-ui,-apple-system,"Segoe UI",sans-serif;color:var(--ink);background:var(--paper)}
 #wrap{position:relative;flex:1;min-height:0}
 #map{position:absolute;inset:0}
-#sb{position:absolute;z-index:1000;top:calc(10px + env(safe-area-inset-top,0px));left:10px;width:calc(100% - 76px);max-width:460px;display:flex;gap:6px}
-#q{flex:1;min-width:0;padding:10px 12px;border:1px solid var(--line);border-radius:8px;font:inherit;background:#fff}
+#sb{position:absolute;z-index:1000;top:calc(10px + env(safe-area-inset-top,0px));left:10px;width:calc(100% - 76px);max-width:460px;display:flex;flex-direction:column;gap:6px}
+#q{flex:1;min-width:0}
+#q,#area{padding:10px 12px;border:1px solid var(--line);border-radius:8px;font:inherit;background:#fff}
+#area{width:100%}
+.sr{display:flex;gap:6px}
 #pubs{white-space:nowrap;background:#fff}
-#res{position:absolute;z-index:1000;top:calc(56px + env(safe-area-inset-top,0px));left:10px;width:calc(100% - 76px);max-width:460px;max-height:50%;overflow:auto;background:#fff;border:1px solid var(--line);border-radius:8px}
+#res{position:absolute;z-index:1000;top:calc(104px + env(safe-area-inset-top,0px));left:10px;width:calc(100% - 76px);max-width:460px;max-height:50%;overflow:auto;background:#fff;border:1px solid var(--line);border-radius:8px}
 #res[hidden]{display:none}
 #res button{display:block;width:100%;text-align:left;border:0;border-bottom:1px solid var(--line);border-radius:0;padding:10px 12px;background:#fff}
 #res button:last-child{border-bottom:0}
@@ -62,7 +65,7 @@ button:focus-visible,input:focus-visible,.tab:focus-visible{outline:3px solid #1
 <body>
 <div id="wrap">
   <div id="map"></div>
-  <div id="sb"><input id="q" type="search" placeholder="Pub, town or postcode" aria-label="Search" enterkeyhint="search"><button id="pubs">Pubs here</button></div><div id="res" hidden></div>
+  <div id="sb"><div class="sr"><input id="q" type="search" placeholder="Pub name (optional)" aria-label="Pub name" enterkeyhint="search"><button id="pubs">Find pubs</button></div><input id="area" type="search" placeholder="Area (blank = where the map is)" aria-label="Area" enterkeyhint="search"></div><div id="res" hidden></div>
   <button id="loc" aria-label="Show my location">&#9678;</button>
 </div>
 <div id="panel">
@@ -353,30 +356,67 @@ function showRes(items){
   items.forEach(i=>{const b=document.createElement('button');b.innerHTML='<span></span><small></small>';b.firstChild.textContent=i.name;b.lastChild.textContent=i.sub;b.onclick=()=>pick(i.lat,i.lon,i.name,i.box);res.append(b)});
   res.hidden=false;res.scrollTop=0;
 }
-async function search(){
-  const q=$('q').value.trim();if(!q)return closeRes();
-  let u='https://nominatim.openstreetmap.org/search?format=json&addressdetails=1&countrycodes=gb&limit=6&q='+encodeURIComponent(q);
-  if(map.getZoom()>=9){const b=map.getBounds();u+='&viewbox='+[b.getWest(),b.getNorth(),b.getEast(),b.getSouth()].join(',')}
-  try{
-    const r=await(await fetch(u)).json();
-    showRes(r.map(x=>{
-      const a=x.address||{},parts=x.display_name.split(', '),town=a.village||a.town||a.hamlet||a.suburb||a.city||'';
-      const point=['amenity','tourism','shop','leisure'].includes(x.class);
-      return{name:x.name||parts[0],sub:[town,a.county||a.state_district||a.state||''].filter(Boolean).join(', ')||parts.slice(1,3).join(', '),lat:+x.lat,lon:+x.lon,box:point?null:x.boundingbox.map(Number)};
-    }));
-  }catch(e){toast('Search needs an internet connection')}
+async function centre(){
+  if(map.getZoom()>=9)return map.getCenter();
+  toast('Finding your location…');
+  return new Promise(res=>navigator.geolocation?navigator.geolocation.getCurrentPosition(p=>{map.setView(showMe(p),14);res(map.getCenter())},()=>{toast('Allow location, or zoom in to your area first');res(null)},{timeout:8000,maximumAge:60000}):res(null));
 }
-$('q').onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();search()}else if(e.key==='Escape')closeRes()};
-$('pubs').onclick=async()=>{
-  if(map.getZoom()<13)return toast('Zoom in to your area first to list pubs');
-  const b=map.getBounds(),c=map.getCenter();toast('Finding pubs…');
-  try{
-    const q='[out:json][timeout:15];nwr["amenity"="pub"]["name"]('+[b.getSouth(),b.getWest(),b.getNorth(),b.getEast()].join(',')+');out center 80;';
-    const j=await(await fetch('https://overpass-api.de/api/interpreter',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'data='+encodeURIComponent(q)})).json();
-    showRes(j.elements.map(e=>{const la=e.lat!=null?e.lat:e.center.lat,lo=e.lon!=null?e.lon:e.center.lon,t=e.tags;
-      return{name:t.name,sub:[t['addr:street'],t['addr:city']||t['addr:village']||t['addr:postcode']].filter(Boolean).join(', ')||'Pub',lat:la,lon:lo,box:null,d:c.distanceTo([la,lo])}}).sort((a,b)=>a.d-b.d).slice(0,25));
-  }catch(e){toast('Could not load pubs. Try again in a moment.')}
+async function overpass(q){
+  const r=await fetch('https://overpass-api.de/api/interpreter',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'data='+encodeURIComponent(q)});
+  return (await r.json()).elements||[];
+}
+function pubItem(e,c){
+  const la=e.lat!=null?e.lat:e.center.lat,lo=e.lon!=null?e.lon:e.center.lon,t=e.tags||{},d=c.distanceTo([la,lo]);
+  const a=[t['addr:street'],t['addr:city']||t['addr:village']||t['addr:postcode']].filter(Boolean).join(', ');
+  return{name:t.name,sub:(a||'Pub')+' · '+(d/1609.344).toFixed(1)+' mi away',lat:la,lon:lo,box:null,d};
+}
+const byDist=(a,b)=>a.d-b.d;
+const place=x=>{
+  const a=x.address||{},parts=x.display_name.split(', '),town=a.village||a.town||a.hamlet||a.suburb||a.city||'';
+  return{name:x.name||parts[0],sub:[town,a.county||a.state_district||a.state||''].filter(Boolean).join(', ')||parts.slice(1,3).join(', '),lat:+x.lat,lon:+x.lon,box:['amenity','tourism','shop','leisure'].includes(x.class)?null:x.boundingbox.map(Number)};
 };
+const nom=async q=>(await(await fetch('https://nominatim.openstreetmap.org/search?format=json&addressdetails=1&countrycodes=gb&limit='+q.limit+'&q='+encodeURIComponent(q.text))).json());
+let areaDirty=false,areaT,autoKey='';
+$('area').oninput=()=>{areaDirty=$('area').value.trim()!==''};
+function autoArea(){
+  clearTimeout(areaT);
+  areaT=setTimeout(async()=>{
+    if(areaDirty||map.getZoom()<10)return;
+    const c=map.getCenter(),key=c.lat.toFixed(2)+','+c.lng.toFixed(2);if(key===autoKey)return;autoKey=key;
+    try{
+      const j=await(await fetch('https://nominatim.openstreetmap.org/reverse?format=json&zoom=14&addressdetails=1&lat='+c.lat+'&lon='+c.lng)).json(),a=j.address||{};
+      const n=a.hamlet||a.village||a.suburb||a.town||a.city||a.county||'';
+      if(n&&!areaDirty)$('area').value=[n,a.county&&a.county!==n?a.county:''].filter(Boolean).join(', ');
+    }catch(e){}
+  },900);
+}
+map.on('moveend',autoArea);
+async function findPubs(){
+  const name=$('q').value.trim(),at=$('area').value.trim();
+  let c;
+  if(areaDirty&&at){
+    toast('Finding '+at+'…');
+    let r;try{r=(await nom({text:at,limit:1}))[0]}catch(e){return toast('Search needs an internet connection')}
+    if(!r)return toast('Could not find that area');
+    c=L.latLng(+r.lat,+r.lon);map.setView(c,14);
+  }else c=await centre();
+  if(!c)return;
+  toast(name?'Searching…':'Finding pubs…');
+  let items=[],failed=false;
+  try{
+    const rx=name.replace(/[.*+?^${}()|[\]\\]/g,'\\$&').replace(/\\/g,'\\\\').replace(/"/g,'\\"');
+    const filt=name?'["name"~"'+rx+'",i]':'["name"]';
+    items=(await overpass('[out:json][timeout:15];nwr["amenity"="pub"]'+filt+'(around:'+(name?15000:4000)+','+c.lat+','+c.lng+');out center 80;')).map(e=>pubItem(e,c)).sort(byDist).slice(0,25);
+  }catch(e){failed=true}
+  if(!items.length&&name){
+    try{items=(await nom({text:name+(at?' '+at:''),limit:6})).map(place);failed=false}catch(e){}
+  }
+  if(failed&&!items.length)return toast('Could not load pubs. Try again in a moment.');
+  showRes(items);
+}
+$('pubs').onclick=findPubs;
+['q','area'].forEach(id=>$(id).onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();findPubs()}else if(e.key==='Escape')closeRes()});
+
 /* startup: open a route from HDSG Walks, otherwise centre on my location */
 async function openFromHdsg(kind,id){
   const t=kind==='walk'?'walk_events':'trip_day_levels';
