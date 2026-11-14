@@ -152,8 +152,9 @@ document.querySelectorAll('.tab').forEach(b=>b.onclick=()=>tabTo(b.dataset.t));
 /* ---------- plot ---------- */
 let wps=[],loaded=null,mode='foot';
 const line=L.polyline([],{color:'#d9480f',weight:5,opacity:.9}).addTo(map);
-const path=()=>loaded||wps.flatMap(w=>w.seg);
-const dist=p=>p.reduce((s,q,i)=>i?s+L.latLng(p[i-1]).distanceTo(L.latLng(q)):0,0);
+const LL=p=>L.latLng(p[0],p[1]);
+const path=()=>loaded?loaded.map(p=>[p[0],p[1]]):wps.flatMap(w=>w.seg);
+const dist=p=>p.reduce((s,q,i)=>i?s+LL(p[i-1]).distanceTo(LL(q)):0,0);
 const redraw=()=>{const p=path();line.setLatLngs(p);$('pd').textContent=mi(dist(p))};
 
 async function seg(w){
@@ -277,7 +278,7 @@ function stopFollow(){if(fw!=null)navigator.geolocation.clearWatch(fw);fw=null;$
 $('fb').onclick=()=>{
   if(fw!=null)return stopFollow();
   fpts=path();if(fpts.length<2)return toast('Plot or load a route first');
-  fcum=[0];for(let i=1;i<fpts.length;i++)fcum[i]=fcum[i-1]+L.latLng(fpts[i-1]).distanceTo(L.latLng(fpts[i]));
+  fcum=[0];for(let i=1;i<fpts.length;i++)fcum[i]=fcum[i-1]+LL(fpts[i-1]).distanceTo(LL(fpts[i]));
   const tot=fcum[fcum.length-1];
   fw=navigator.geolocation.watchPosition(p=>{
     const ll=showMe(p);if($('ac').checked)map.panTo(ll);
@@ -307,7 +308,7 @@ $('rb').onclick=()=>{
   rw=navigator.geolocation.watchPosition(p=>{
     const ll=showMe(p),c=p.coords;if(c.accuracy>40)return;
     const last=rec[rec.length-1];
-    if(last){const d=L.latLng(last).distanceTo(L.latLng(ll));if(d<4)return;rdist+=d}
+    if(last){const d=LL(last).distanceTo(LL(ll));if(d<4)return;rdist+=d}
     if(c.altitude!=null){if(lastEle==null)lastEle=c.altitude;else if(c.altitude-lastEle>=3){asc+=c.altitude-lastEle;lastEle=c.altitude}else if(lastEle-c.altitude>=3)lastEle=c.altitude}
     rec.push([ll[0],ll[1],c.altitude,p.timestamp]);rline.addLatLng(ll);
     if($('ac').checked)map.panTo(ll);
