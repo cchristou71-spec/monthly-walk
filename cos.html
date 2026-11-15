@@ -384,7 +384,7 @@ function renderSug(s,draw,prefix){
   const st=$('sst'),box=$('sres'),from=s.from,D=s.D;
   sugLayer.clearLayers();sugLines=[];sugMarker=null;box.innerHTML='';
   const more=document.createElement('p');more.className='m';more.textContent='More published walks on other sites: ';
-  [['Wikiloc','wikiloc.com'],['Walking Englishman','walkingenglishman.com'],['Walkr','walkr.co.uk']].forEach((site,i)=>{if(i)more.append(' · ');const a=document.createElement('a');a.textContent=site[0];a.href='https://www.google.com/search?q='+encodeURIComponent('site:'+site[1]+' walking routes '+from);a.target='_blank';a.rel='noopener';a.style.color='var(--green)';more.append(a)});
+  [['Komoot','komoot.com'],['AllTrails','alltrails.com'],['Wikiloc','wikiloc.com'],['Walking Englishman','walkingenglishman.com'],['Walkr','walkr.co.uk']].forEach((site,i)=>{if(i)more.append(' · ');const a=document.createElement('a');a.textContent=site[0];a.href='https://www.google.com/search?q='+encodeURIComponent('site:'+site[1]+' walking routes '+from);a.target='_blank';a.rel='noopener';a.style.color='var(--green)';more.append(a)});
   if(!s.list.length){st.textContent=(prefix||'')+'No published walking routes found within 10 miles of '+from+'. Try a nearby town or village.';box.append(more);return}
   sugMarker=L.circleMarker([s.c.lat,s.c.lng],{radius:8,color:'#fff',weight:3,fillColor:'#2b8a3e',fillOpacity:1});
   s.list.forEach((r,i)=>{
