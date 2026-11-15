@@ -691,6 +691,24 @@ function CosRoutePicker({ onPick }) {
   );
 }
 
+
+// ---- Route link helpers ----
+function isOsLink(u) { return /osmaps\.com|ordnancesurvey\.co\.uk/i.test(u || ''); }
+function cleanLink(u) {
+  const t = (u || '').trim();
+  if (!t) return t;
+  return /^https?:\/\//i.test(t) ? t : 'https://' + t;
+}
+function routeLinkLabel(u) { return isOsLink(u) ? '🧭 Open route in OS Maps' : '🔗 Open route link'; }
+function RouteLinkField({ value, onChange }) {
+  return (
+    <React.Fragment>
+      <input type="text" inputMode="url" autoCapitalize="none" autoCorrect="off" placeholder="Paste your OS Maps (or Komoot, AllTrails) link" value={value} onChange={e => onChange(e.target.value)} onBlur={e => onChange(cleanLink(e.target.value))} />
+      <p style={{fontSize:12, color:'#8a9089', margin:'6px 0 0'}}>Everyone can tap this link to open the route and follow it.</p>
+    </React.Fragment>
+  );
+}
+
 function RouteMap({ gpxContent }) {
   const containerRef = useRef(null);
   const mapRef = useRef(null);
@@ -2640,8 +2658,8 @@ function App() {
               <div className="card">
                 {selectedEvent.route_link && (
                   <div className="route-links" style={{marginTop:10}}>
-                    <a className="link-chip" target="_blank" rel="noopener noreferrer" href={selectedEvent.route_link}>
-                      🔗 Route link
+                    <a className="link-chip" target="_blank" rel="noopener noreferrer" href={cleanLink(selectedEvent.route_link)}>
+                      {routeLinkLabel(selectedEvent.route_link)}
                     </a>
                   </div>
                 )}
@@ -2909,7 +2927,7 @@ function App() {
 
               <div className="field">
                 <label>Route link (optional)</label>
-                <input type="url" placeholder="e.g. OS Maps, Komoot, AllTrails link" value={form.route_link} onChange={e => setForm({ ...form, route_link: e.target.value })} />
+                <RouteLinkField value={form.route_link || ''} onChange={v => setForm(f => ({ ...f, route_link: v }))} />
               </div>
 
               <div className="field">
@@ -3221,7 +3239,7 @@ function App() {
                       </div>
                       <div className="field">
                         <label>Route link (optional)</label>
-                        <input type="url" placeholder="e.g. OS Maps, Komoot, AllTrails link" value={levelForm.route_link} onChange={e => setLevelForm({ ...levelForm, route_link: e.target.value })} />
+                        <RouteLinkField value={levelForm.route_link || ''} onChange={v => setLevelForm(f => ({ ...f, route_link: v }))} />
                       </div>
                       <div className="field">
                         <label>Distance &amp; ascent (optional)</label>
@@ -3321,7 +3339,7 @@ function App() {
                   </div>
                   <div className="field">
                     <label>Route link (optional)</label>
-                    <input type="url" placeholder="e.g. OS Maps, Komoot, AllTrails link" value={levelForm.route_link} onChange={e => setLevelForm({ ...levelForm, route_link: e.target.value })} />
+                    <RouteLinkField value={levelForm.route_link || ''} onChange={v => setLevelForm(f => ({ ...f, route_link: v }))} />
                   </div>
                   {wt === 'Alternative Route' && (
                     <React.Fragment>
@@ -3827,7 +3845,7 @@ function App() {
                     </div>
                     <div className="field">
                       <label>Route link (optional)</label>
-                      <input type="url" placeholder="e.g. OS Maps, Komoot, AllTrails link" value={levelForm.route_link} onChange={e => setLevelForm({ ...levelForm, route_link: e.target.value })} />
+                      <RouteLinkField value={levelForm.route_link || ''} onChange={v => setLevelForm(f => ({ ...f, route_link: v }))} />
                     </div>
                     {selectedLevel.walk_type !== 'Non Walking Option' && (
                       <React.Fragment>
@@ -3886,7 +3904,7 @@ function App() {
                     {selectedLevel.details && <p className="walk-details" style={{margin:'0 0 6px'}}>{selectedLevel.details}</p>}
                     {selectedLevel.route_link && (
                       <div className="route-links" style={{marginBottom:10}}>
-                        <a className="link-chip" target="_blank" rel="noopener noreferrer" href={selectedLevel.route_link}>🔗 Route link</a>
+                        <a className="link-chip" target="_blank" rel="noopener noreferrer" href={cleanLink(selectedLevel.route_link)}>{routeLinkLabel(selectedLevel.route_link)}</a>
                       </div>
                     )}
                     {selectedLevel.walk_type !== 'Non Walking Option' && selectedLevel.gpx_content && <p className="nav-hint-top">To open this map and follow the route, see the instructions below.</p>}
