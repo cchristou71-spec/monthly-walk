@@ -58,6 +58,8 @@ button:focus-visible,input:focus-visible,.tab:focus-visible{outline:3px solid #1
 .it button{padding:6px 10px;font-size:14px}
 .chk{margin-left:4px;font-size:13px;color:var(--muted);white-space:nowrap}
 .wp{width:16px;height:16px;border-radius:50%;background:var(--route);border:3px solid #fff;box-shadow:0 0 0 1px var(--ink)}
+#warn{position:absolute;z-index:1100;left:10px;right:70px;bottom:14px;background:#c2255c;color:#fff;font-weight:700;font-size:18px;padding:12px 14px;border-radius:10px;box-shadow:0 2px 8px #0005}
+#warn[hidden]{display:none}
 #toast{position:fixed;z-index:3000;left:50%;top:calc(64px + env(safe-area-inset-top,0px));transform:translateX(-50%);max-width:90%;background:var(--ink);color:#fff;padding:9px 14px;border-radius:8px;opacity:0;pointer-events:none;transition:opacity .2s}
 #toast.on{opacity:1}
 </style>
@@ -67,6 +69,7 @@ button:focus-visible,input:focus-visible,.tab:focus-visible{outline:3px solid #1
   <div id="map"></div>
   <div id="sb"><div class="sr"><input id="q" type="search" placeholder="Pub name (optional)" aria-label="Pub name" enterkeyhint="search"><button id="pubs">Find pubs</button></div><input id="area" type="search" placeholder="Area (blank = where the map is)" aria-label="Area" enterkeyhint="search"></div><div id="res" hidden></div>
   <button id="loc" aria-label="Show my location">&#9678;</button>
+  <div id="warn" role="alert" hidden></div>
 </div>
 <div id="panel">
   <div id="tabs" role="tablist">
@@ -91,7 +94,7 @@ button:focus-visible,input:focus-visible,.tab:focus-visible{outline:3px solid #1
 
   <div class="pane" id="p-follow" hidden>
     <div class="row"><a id="back" href="./" hidden style="font-weight:600;color:var(--green);padding:6px 0">&larr; Back to HDSG Walks</a></div>
-    <div class="row"><button id="fb" class="go">Start following</button><span class="m" id="fm">Uses the route on the map.</span></div>
+    <div class="row"><button id="fb" class="go">Start following</button><span class="m" id="fm">Uses the route on the map. Keep the screen on so warnings can sound.</span></div>
     <div class="stat" id="fs"><div><b>–</b><span>Done</span></div><div><b>–</b><span>Left</span></div><div id="fo"><b>–</b><span>Off route</span></div></div>
   </div>
 
@@ -268,26 +271,56 @@ document.addEventListener('visibilitychange',()=>{if(document.visibilityState===
 
 /* ---------- follow ---------- */
 let fw=null,fpts=[],fcum=[];
-function snapTo(ll){
-  const k=Math.cos(ll[0]*Math.PI/180),R=111320;let best=1e12,al=0;
+let fprev=null;
+function snapTo(ll,prev){
+  const k=Math.cos(ll[0]*Math.PI/180),R=111320;let g={d:1e12,al:0},w={d:1e12,al:0,cost:1e12};
   for(let i=1;i<fpts.length;i++){
     const a=fpts[i-1],b=fpts[i],ax=(a[1]-ll[1])*k*R,ay=(a[0]-ll[0])*R,bx=(b[1]-ll[1])*k*R,by=(b[0]-ll[0])*R;
-    const dx=bx-ax,dy=by-ay,l2=dx*dx+dy*dy,t=l2?Math.max(0,Math.min(1,-(ax*dx+ay*dy)/l2)):0,d=Math.hypot(ax+t*dx,ay+t*dy);
-    if(d<best){best=d;al=fcum[i-1]+t*(fcum[i]-fcum[i-1])}
+    const dx=bx-ax,dy=by-ay,l2=dx*dx+dy*dy,t=l2?Math.max(0,Math.min(1,-(ax*dx+ay*dy)/l2)):0,d=Math.hypot(ax+t*dx,ay+t*dy),al=fcum[i-1]+t*(fcum[i]-fcum[i-1]);
+    if(d<g.d)g={d,al};
+    if(prev!=null&&fcum[i]>=prev-150&&fcum[i-1]<=prev+600){const cost=d+0.05*(al>=prev?al-prev:3*(prev-al));if(cost<w.cost)w={d,al,cost}}
   }
-  return{off:best,done:al};
+  const s=(prev!=null&&w.d<=Math.max(40,g.d+25))?w:g;
+  return{off:s.d,done:s.al};
 }
-function stopFollow(){if(fw!=null)navigator.geolocation.clearWatch(fw);fw=null;$('fb').textContent='Start following';$('fb').className='go';$('fo').classList.remove('off');unwake()}
+/* warnings: off route / wrong way */
+let fh=[],wstate=null,offN=0,backN=0,ac=null;
+function beep(){try{ac=ac||new(window.AudioContext||window.webkitAudioContext)();if(ac.state==='suspended')ac.resume();const o=ac.createOscillator(),g=ac.createGain();o.frequency.value=880;g.gain.value=.3;o.connect(g);g.connect(ac.destination);o.start();o.stop(ac.currentTime+.4)}catch(e){}}
+function setWarn(s,msg){
+  if(s===wstate)return;wstate=s;
+  if(!s){$('warn').hidden=true;return}
+  $('warn').textContent=msg;$('warn').hidden=false;
+  try{navigator.vibrate&&navigator.vibrate([300,150,300,150,300])}catch(e){}
+  beep();setTimeout(beep,700);
+}
+function checkWarn(ll,r){
+  offN=r.off>40?offN+1:0;
+  const last=fh[fh.length-1];
+  if(!last||LL(last.ll).distanceTo(LL(ll))>=15){fh.push({ll,done:r.done});if(fh.length>8)fh.shift()}
+  let wrong=false;
+  if(fh.length>=4&&r.off<=40){
+    let moved=0;for(let i=1;i<fh.length;i++)moved+=LL(fh[i-1].ll).distanceTo(LL(fh[i].ll));
+    const diff=fh[fh.length-1].done-fh[0].done;
+    wrong=moved>=50&&diff<-0.6*moved&&-diff<=1.5*moved;
+  }
+  backN=wrong?backN+1:0;
+  if(offN>=2)setWarn('off',"You're off the route");
+  else if(backN>=2)setWarn('back',"You're going the wrong way");
+  else if(offN===0&&backN===0)setWarn(null);
+}
+function stopFollow(){if(fw!=null)navigator.geolocation.clearWatch(fw);fw=null;setWarn(null);$('fb').textContent='Start following';$('fb').className='go';$('fo').classList.remove('off');unwake()}
 $('fb').onclick=()=>{
   if(fw!=null)return stopFollow();
   fpts=path();if(fpts.length<2)return toast('Plot or load a route first');
+  fh=[];wstate=null;offN=0;backN=0;fprev=null;
+  try{ac=ac||new(window.AudioContext||window.webkitAudioContext)();ac.resume()}catch(e){}
   fcum=[0];for(let i=1;i<fpts.length;i++)fcum[i]=fcum[i-1]+LL(fpts[i-1]).distanceTo(LL(fpts[i]));
   const tot=fcum[fcum.length-1];
   fw=navigator.geolocation.watchPosition(p=>{
     const ll=showMe(p);if($('ac').checked)map.panTo(ll);
-    const r=snapTo(ll),b=$('fs').querySelectorAll('b');
+    const r=snapTo(ll,fprev),b=$('fs').querySelectorAll('b');fprev=r.done;
     b[0].textContent=mi(r.done);b[1].textContent=mi(Math.max(0,tot-r.done));b[2].textContent=Math.round(r.off*3.28084)+' ft';
-    $('fo').classList.toggle('off',r.off>40);
+    $('fo').classList.toggle('off',r.off>40);checkWarn(ll,r);
   },gerr,{enableHighAccuracy:true,maximumAge:2000});
   $('fb').textContent='Stop following';$('fb').className='stop';wake();
 };
