@@ -60,6 +60,20 @@ button:focus-visible,input:focus-visible,.tab:focus-visible{outline:3px solid #1
 .wp{width:16px;height:16px;border-radius:50%;background:var(--route);border:3px solid #fff;box-shadow:0 0 0 1px var(--ink)}
 #warn{position:absolute;z-index:1100;left:10px;right:70px;bottom:14px;background:#c2255c;color:#fff;font-weight:700;font-size:18px;padding:12px 14px;border-radius:10px;box-shadow:0 2px 8px #0005}
 #warn[hidden]{display:none}
+body.fs #panel,body.fs #sb,body.fs #res{display:none}
+#fsbar{display:none;position:absolute;z-index:1050;top:calc(10px + env(safe-area-inset-top,0px));left:10px;right:10px;gap:6px;align-items:stretch}
+body.fs #fsbar{display:flex}
+#fsbar .st{flex:1;display:grid;grid-template-columns:repeat(3,1fr);gap:4px;background:#fffffff2;border:1px solid var(--line);border-radius:10px;padding:5px 8px}
+#fsbar .st b{display:block;font-size:17px}
+#fsbar .st span{font-size:11px;color:var(--muted)}
+#fsbar .st .off b{color:var(--rec)}
+#fsbar button{min-width:48px;font-weight:700}
+#tabs{flex-wrap:wrap}
+.tab{font-size:14px;padding:9px 2px;min-width:0}
+#sa,#sm{padding:9px 10px;border:1px solid var(--line);border-radius:8px;font:inherit;background:#fff}
+#sa{flex:1;min-width:0}
+#sm{width:72px}
+.sw{display:inline-block;width:12px;height:12px;border-radius:50%;margin-right:6px;vertical-align:-1px}
 #toast{position:fixed;z-index:3000;left:50%;top:calc(64px + env(safe-area-inset-top,0px));transform:translateX(-50%);max-width:90%;background:var(--ink);color:#fff;padding:9px 14px;border-radius:8px;opacity:0;pointer-events:none;transition:opacity .2s}
 #toast.on{opacity:1}
 </style>
@@ -68,12 +82,14 @@ button:focus-visible,input:focus-visible,.tab:focus-visible{outline:3px solid #1
 <div id="wrap">
   <div id="map"></div>
   <div id="sb"><div class="sr"><input id="q" type="search" placeholder="Pub name (optional)" aria-label="Pub name" enterkeyhint="search"><button id="pubs">Find pubs</button></div><input id="area" type="search" placeholder="Area (blank = where the map is)" aria-label="Area" enterkeyhint="search"></div><div id="res" hidden></div>
+  <div id="fsbar"><div class="st"><div><b>–</b><span>Done</span></div><div><b>–</b><span>Left</span></div><div id="fso"><b>–</b><span>Off route</span></div></div><button id="fss" class="stop" aria-label="Stop following">Stop</button><button id="fsx" aria-label="Exit full screen">&#10005;</button></div>
   <button id="loc" aria-label="Show my location">&#9678;</button>
   <div id="warn" role="alert" hidden></div>
 </div>
 <div id="panel">
   <div id="tabs" role="tablist">
     <button class="tab on" data-t="plot">Plot</button>
+    <button class="tab" data-t="suggest">Suggest</button>
     <button class="tab" data-t="follow">Follow</button>
     <button class="tab" data-t="record">Record</button>
     <button class="tab" data-t="saved">Saved</button>
@@ -92,9 +108,16 @@ button:focus-visible,input:focus-visible,.tab:focus-visible{outline:3px solid #1
     <p class="m">Tap the map to add points and drag a point to adjust it. Walk, Cycle and Drive snap points and legs to nearby paths or roads.</p>
   </div>
 
+  <div class="pane" id="p-suggest" hidden>
+    <div class="row"><input id="sa" type="search" placeholder="Start: town, village or postcode (blank = map centre)" aria-label="Start area" enterkeyhint="go"></div>
+    <div class="row"><input id="sm" type="number" inputmode="decimal" min="0.5" max="15" step="0.5" value="5" aria-label="Miles"><span>miles, approx.</span><button id="sgo" class="go">Suggest routes</button></div>
+    <p class="m" id="sst">Loops that start and finish at the same place, using footpaths, bridleways and trails. Roads are only used as short links, or more freely for walks of 2 miles or less.</p>
+    <div id="sres"></div>
+  </div>
+
   <div class="pane" id="p-follow" hidden>
     <div class="row"><a id="back" href="./" hidden style="font-weight:600;color:var(--green);padding:6px 0">&larr; Back to HDSG Walks</a></div>
-    <div class="row"><button id="fb" class="go">Start following</button><span class="m" id="fm">Uses the route on the map. Keep the screen on so warnings can sound.</span></div>
+    <div class="row"><button id="fb" class="go">Start following</button><button id="fsb">Full screen map</button><span class="m" id="fm">Uses the route on the map. Keep the screen on so warnings can sound.</span></div>
     <div class="stat" id="fs"><div><b>–</b><span>Done</span></div><div><b>–</b><span>Left</span></div><div id="fo"><b>–</b><span>Off route</span></div></div>
   </div>
 
@@ -224,7 +247,7 @@ function dl(name,pts){
 const store=()=>{try{return JSON.parse(localStorage.getItem('routes')||'[]')}catch(e){return[]}};
 const put=a=>{try{localStorage.setItem('routes',JSON.stringify(a))}catch(e){toast('Storage is full. Export GPX files and delete old items.')}};
 function save(name,pts,type){const a=store();a.unshift({id:Date.now()+Math.random(),name,pts,type,date:new Date().toISOString(),dist:dist(pts)});put(a);list()}
-function show(r){clearPlan();loaded=r.pts;redraw();map.fitBounds(line.getBounds(),{padding:[40,40]})}
+function show(r){sugLayer.clearLayers();clearPlan();loaded=r.pts;redraw();map.fitBounds(line.getBounds(),{padding:[40,40]})}
 function list(){
   const a=store(),box=$('list');box.innerHTML=a.length?'':'<p class="m">Nothing saved yet. Save a plotted route or finish a recording.</p>';
   a.forEach(r=>{
@@ -257,6 +280,150 @@ $('imp').onchange=async e=>{
   }
   e.target.value='';
 };
+
+
+/* ---------- suggest routes: loops from a start, paths first ---------- */
+const sugLayer=L.layerGroup().addTo(map);
+let sugLines=[];
+const SUGCOL=['#1c7ed6','#9c36b6','#e8590c','#2b8a3e','#c2255c'];
+const D2R=Math.PI/180;
+const dm=(a,b,c,d)=>Math.hypot((c-a)*111195,(d-b)*111195*Math.cos((a+c)*D2R/2));
+const tick=()=>new Promise(r=>setTimeout(r,0));
+function buildGraph(els,short){
+  const idx=new Map(),lat=[],lon=[],adj=[],mult=short?1.5:6;
+  const node=(la,lo)=>{const k=la+','+lo;let i=idx.get(k);if(i===undefined){i=lat.length;idx.set(k,i);lat.push(la);lon.push(lo);adj.push([])}return i};
+  for(const w of els){
+    const g=w.geometry;if(!g||g.length<2)continue;
+    const t=w.tags||{},h=t.highway;let road=false,m=1;
+    if(['residential','unclassified','service','living_street'].includes(h)||(h==='footway'&&(t.footway==='sidewalk'||t.footway==='crossing'))||(h==='cycleway'&&t.cycleway==='crossing')){road=true;m=mult}
+    else if(h==='steps')m=1.3;
+    for(let i=1;i<g.length;i++){
+      const a=node(g[i-1].lat,g[i-1].lon),b=node(g[i].lat,g[i].lon);if(a===b)continue;
+      const len=dm(lat[a],lon[a],lat[b],lon[b]),id=a<b?a*2e6+b:b*2e6+a;
+      adj[a].push({to:b,len,cost:len*m,road,id});adj[b].push({to:a,len,cost:len*m,road,id});
+    }
+  }
+  const n=lat.length,comp=new Int32Array(n).fill(-1),sizes=[];
+  for(let s=0;s<n;s++){if(comp[s]>=0)continue;const c=sizes.length;let cnt=0;const st=[s];comp[s]=c;while(st.length){const x=st.pop();cnt++;for(const e of adj[x])if(comp[e.to]<0){comp[e.to]=c;st.push(e.to)}}sizes.push(cnt)}
+  return{lat,lon,adj,n,comp,sizes,okc:null,gs:new Float64Array(n),stamp:new Int32Array(n),cl:new Int32Array(n),prev:new Int32Array(n),run:0};
+}
+function astar(G,s,t,used){
+  const{adj,lat,lon,gs,stamp,cl,prev}=G,run=++G.run,tl=lat[t],tn=lon[t],hf=[],hn=[];
+  const push=(f,x)=>{let i=hf.length;hf.push(f);hn.push(x);while(i>0){const p=(i-1)>>1;if(hf[p]<=f)break;hf[i]=hf[p];hn[i]=hn[p];i=p}hf[i]=f;hn[i]=x};
+  const pop=()=>{const x=hn[0],lf=hf.pop(),ln=hn.pop(),n=hf.length;if(n){let i=0;for(;;){let c=2*i+1;if(c>=n)break;if(c+1<n&&hf[c+1]<hf[c])c++;if(hf[c]>=lf)break;hf[i]=hf[c];hn[i]=hn[c];i=c}hf[i]=lf;hn[i]=ln}return x};
+  stamp[s]=run;gs[s]=0;prev[s]=-1;push(dm(lat[s],lon[s],tl,tn),s);
+  while(hf.length){
+    const x=pop();if(cl[x]===run)continue;cl[x]=run;
+    if(x===t){const p=[];for(let y=t;y!==-1;y=prev[y])p.push(y);return p.reverse()}
+    for(const e of adj[x]){
+      const y=e.to;if(cl[y]===run)continue;
+      const c=gs[x]+e.cost*(used&&used.has(e.id)?6:1);
+      if(stamp[y]!==run||c<gs[y]){stamp[y]=run;gs[y]=c;prev[y]=x;push(c+dm(lat[y],lon[y],tl,tn),y)}
+    }
+  }
+  return null;
+}
+function nearest(G,la,lo,maxM){
+  const k=Math.cos(la*D2R);let best=-1,bd=1e18;
+  for(let i=0;i<G.n;i++){if(!G.okc[G.comp[i]])continue;const dy=(G.lat[i]-la)*111195,dx=(G.lon[i]-lo)*111195*k,d=dx*dx+dy*dy;if(d<bd){bd=d;best=i}}
+  return best>=0&&Math.sqrt(bd)<=maxM?best:-1;
+}
+function makeLoop(G,s,r,bearing){
+  const la0=G.lat[s],lo0=G.lon[s],k=Math.cos(la0*D2R),b=bearing*D2R,cx=r*Math.sin(b),cy=r*Math.cos(b),seq=[s];
+  for(const off of [90,180,270]){
+    const th=b+Math.PI+off*D2R,w=nearest(G,la0+(cy+r*Math.cos(th))/111195,lo0+(cx+r*Math.sin(th))/(111195*k),r*.6);
+    if(w<0||seq.includes(w))return null;seq.push(w);
+  }
+  seq.push(s);
+  const used=new Set();let nodes=[s];
+  for(let i=1;i<seq.length;i++){
+    const p=astar(G,seq[i-1],seq[i],used);if(!p)return null;
+    for(let j=1;j<p.length;j++)used.add(G.adj[p[j-1]].find(q=>q.to===p[j]).id);
+    nodes=nodes.concat(p.slice(1));
+  }
+  let len=0,rep=0,road=0;const seen=new Set();
+  for(let j=1;j<nodes.length;j++){const e=G.adj[nodes[j-1]].find(q=>q.to===nodes[j]);len+=e.len;if(e.road)road+=e.len;if(seen.has(e.id))rep+=e.len;else seen.add(e.id)}
+  return len>0?{nodes,len,rep:rep/len,road:road/len,ids:seen}:null;
+}
+async function planLoops(G,s,Dm,short,onStep){
+  const found=[],bears=[0,45,90,135,180,225,270,315];
+  for(let bi=0;bi<bears.length;bi++){
+    if(onStep){onStep(bi+1,bears.length);await tick()}
+    let r=Dm/(2*Math.PI)/1.3,best=null;
+    for(let it=0;it<4;it++){
+      const R=makeLoop(G,s,r,bears[bi]);if(!R)break;
+      if(!best||Math.abs(R.len-Dm)<Math.abs(best.len-Dm))best=R;
+      const q=R.len/Dm;if(Math.abs(q-1)<=.08)break;
+      r=Math.min(Dm/4,Math.max(Dm/(2*Math.PI)/3,r/Math.pow(q,.9)));
+    }
+    if(best&&Math.abs(best.len/Dm-1)<=.25)found.push(best);
+  }
+  found.forEach(f=>f.score=Math.abs(f.len/Dm-1)*2+f.rep*2.5+f.road*(short?.3:1.2));
+  found.sort((a,b)=>a.score-b.score);
+  const pick=[];
+  for(const f of found){
+    if(f.rep>(short?.5:.35))continue;
+    const dup=pick.some(p=>{let sh=0;for(const id of f.ids)if(p.ids.has(id))sh++;return sh/Math.min(f.ids.size,p.ids.size)>.6});
+    if(!dup)pick.push(f);if(pick.length===5)break;
+  }
+  if(!pick.length&&found.length)pick.push(found[0]);
+  return pick;
+}
+function sugPick(i){sugLines.forEach((l,j)=>{l.setStyle({weight:j===i?7:3,opacity:j===i?1:.35});if(j===i)l.bringToFront()});map.fitBounds(sugLines[i].getBounds(),{padding:[40,40]})}
+async function suggest(){
+  const btn=$('sgo'),st=$('sst'),box=$('sres');
+  let D=parseFloat($('sm').value);if(!(D>0)){toast('Enter how many miles you want');return}
+  D=Math.min(15,Math.max(.5,D));$('sm').value=D;
+  const Dm=D*1609.344,short=D<=2;
+  btn.disabled=true;sugLayer.clearLayers();sugLines=[];box.innerHTML='';
+  try{
+    const txt=$('sa').value.trim();let c;
+    st.textContent='Finding the start…';
+    if(txt){
+      let j=[];try{j=await nom({text:txt,limit:1})}catch(e){}
+      if(!j.length){st.textContent='Could not find "'+txt+'". Try a nearby town or a postcode.';return}
+      c=L.latLng(+j[0].lat,+j[0].lon);
+    }else c=await centre();
+    if(!c){st.textContent='Allow location, or type a start area.';return}
+    st.textContent='Getting paths and trails around the start…';
+    const R=Math.min(7500,Math.round(.36*Dm+500));
+    const q='[out:json][timeout:60];way["highway"~"^(path|footway|bridleway|track|cycleway|pedestrian|steps|living_street|residential|unclassified|service)$"]["access"!~"^(private|no)$"]["foot"!="no"]["service"!~"^(driveway|parking_aisle)$"](around:'+R+','+c.lat+','+c.lng+');out tags geom qt;';
+    let els;
+    try{els=await overpass(q,45000)}catch(e){st.textContent='The path data service is busy. Try again in a minute.';return}
+    if(!els.length){st.textContent='No paths found near there. Try a different start.';return}
+    st.textContent='Building the path network…';await tick();
+    const G=buildGraph(els,short);
+    const big=G.sizes.reduce((a,b)=>Math.max(a,b),0);
+    G.okc=new Uint8Array(G.sizes.length);G.sizes.forEach((z,i)=>G.okc[i]=z>=big*.25?1:0);
+    const s=nearest(G,c.lat,c.lng,1500);
+    if(s<0){st.textContent='No usable paths within a mile of that start. Try a different start.';return}
+    const sd=dm(c.lat,c.lng,G.lat[s],G.lon[s]);
+    G.okc.fill(0);G.okc[G.comp[s]]=1;
+    const pick=await planLoops(G,s,Dm,short,(i,n)=>{st.textContent='Trying loops… direction '+i+' of '+n});
+    if(!pick.length){st.textContent='Could not build a loop that long from there using paths. Try fewer miles or a different start.';return}
+    const from=txt||'the map centre';
+    L.circleMarker([G.lat[s],G.lon[s]],{radius:8,color:'#fff',weight:3,fillColor:'#2b8a3e',fillOpacity:1}).addTo(sugLayer);
+    const all=[];
+    pick.forEach((f,i)=>{
+      const pts=f.nodes.map(x=>[G.lat[x],G.lon[x]]),name='Loop '+D+' mi from '+from+' ('+'ABCDE'[i]+')';
+      const ln=L.polyline(pts,{color:SUGCOL[i],weight:4,opacity:.9}).addTo(sugLayer);sugLines.push(ln);all.push(ln);
+      const d=document.createElement('div');d.className='it';
+      d.innerHTML='<b><span class="sw" style="background:'+SUGCOL[i]+'"></span>Route '+'ABCDE'[i]+'</b><span class="m"></span><div><button>Preview</button><button>Follow</button><button>Save</button><button>Export GPX</button></div>';
+      d.querySelector('span.m').textContent=mi(f.len)+' · '+Math.round((1-f.road)*100)+'% on paths'+(f.rep>.15?' · '+Math.round(f.rep*100)+'% retraced':'');
+      const[pv,fo,sv,ex]=d.querySelectorAll('button');
+      pv.onclick=()=>sugPick(i);
+      fo.onclick=()=>{show({pts});tabTo('follow')};
+      sv.onclick=()=>{save(name,pts,'route');toast('Saved')};
+      ex.onclick=()=>dl(name,pts);
+      box.append(d);
+    });
+    map.fitBounds(L.featureGroup(all).getBounds(),{padding:[40,40]});
+    st.textContent=pick.length+(pick.length===1?' loop':' loops')+' from '+from+', about '+D+' mi.'+(sd>150?' Nearest path to your start is '+Math.round(sd*3.28084)+' ft away, so routes start there.':'')+' Check the ground conditions before you set off.';
+  }finally{btn.disabled=false}
+}
+$('sgo').onclick=suggest;
+$('sa').onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();suggest()}};
+$('sm').onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();suggest()}};
 
 /* ---------- location + wake lock ---------- */
 const me=L.circleMarker([0,0],{radius:8,color:'#fff',weight:3,fillColor:'#1c7ed6',fillOpacity:1});
@@ -308,7 +475,20 @@ function checkWarn(ll,r){
   else if(backN>=2)setWarn('back',"You're going the wrong way");
   else if(offN===0&&backN===0)setWarn(null);
 }
-function stopFollow(){if(fw!=null)navigator.geolocation.clearWatch(fw);fw=null;setWarn(null);$('fb').textContent='Start following';$('fb').className='go';$('fo').classList.remove('off');unwake()}
+function setFS(on){
+  document.body.classList.toggle('fs',on);
+  try{
+    const d=document,e=d.documentElement;
+    if(on&&!d.fullscreenElement&&e.requestFullscreen)e.requestFullscreen({navigationUI:'hide'}).catch(()=>{});
+    else if(!on&&d.fullscreenElement&&d.exitFullscreen)d.exitFullscreen().catch(()=>{});
+  }catch(err){}
+  setTimeout(()=>{map.invalidateSize();if(on&&$('ac').checked&&map.hasLayer(me))map.panTo(me.getLatLng())},150);
+}
+document.addEventListener('fullscreenchange',()=>{if(!document.fullscreenElement&&document.body.classList.contains('fs'))setFS(false)});
+function stopFollow(){if(fw!=null)navigator.geolocation.clearWatch(fw);fw=null;setWarn(null);$('fb').textContent='Start following';$('fb').className='go';$('fo').classList.remove('off');$('fso').classList.remove('off');unwake();setFS(false)}
+$('fsb').onclick=()=>setFS(true);
+$('fsx').onclick=()=>setFS(false);
+$('fss').onclick=()=>{if(fw!=null)stopFollow();setFS(false)};
 $('fb').onclick=()=>{
   if(fw!=null)return stopFollow();
   fpts=path();if(fpts.length<2)return toast('Plot or load a route first');
@@ -320,7 +500,9 @@ $('fb').onclick=()=>{
     const ll=showMe(p);if($('ac').checked)map.panTo(ll);
     const r=snapTo(ll,fprev),b=$('fs').querySelectorAll('b');fprev=r.done;
     b[0].textContent=mi(r.done);b[1].textContent=mi(Math.max(0,tot-r.done));b[2].textContent=Math.round(r.off*3.28084)+' ft';
-    $('fo').classList.toggle('off',r.off>40);checkWarn(ll,r);
+    $('fo').classList.toggle('off',r.off>40);
+    const hb=$('fsbar').querySelectorAll('.st b');hb[0].textContent=b[0].textContent;hb[1].textContent=b[1].textContent;hb[2].textContent=b[2].textContent;$('fso').classList.toggle('off',r.off>40);
+    checkWarn(ll,r);
   },gerr,{enableHighAccuracy:true,maximumAge:2000});
   $('fb').textContent='Stop following';$('fb').className='stop';wake();
 };
@@ -398,9 +580,9 @@ async function centre(){
 }
 const OPS=['https://overpass-api.de/api/interpreter','https://overpass.kumi.systems/api/interpreter','https://overpass.private.coffee/api/interpreter'];
 let dbg=[];
-async function overpass(q){
+async function overpass(q,ms){
   const one=async u=>{
-    const ctl=new AbortController(),t=setTimeout(()=>ctl.abort(),9000),nm=new URL(u).host.replace('overpass','op').replace('.systems','');
+    const ctl=new AbortController(),t=setTimeout(()=>ctl.abort(),ms||9000),nm=new URL(u).host.replace('overpass','op').replace('.systems','');
     try{
       const r=await fetch(u,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'data='+encodeURIComponent(q),signal:ctl.signal});
       if(!r.ok)throw new Error('HTTP '+r.status);
