@@ -69,7 +69,8 @@ body.fs #fsbar{display:flex}
 #fsbar .st .off b{color:var(--rec)}
 #fsbar button{min-width:48px;font-weight:700}
 #tabs{flex-wrap:wrap}
-.tab{font-size:14px;padding:9px 2px;min-width:0}
+.chk{flex:0 0 100%;margin:2px 0 0 2px}
+.tab{font-size:14px;padding:9px 2px;min-width:0;white-space:nowrap}
 #sa,#sm{padding:9px 10px;border:1px solid var(--line);border-radius:8px;font:inherit;background:#fff}
 #sa{flex:1;min-width:0}
 #sm{width:72px}
@@ -294,7 +295,7 @@ function buildGraph(els,short){
   const node=(la,lo)=>{const k=la+','+lo;let i=idx.get(k);if(i===undefined){i=lat.length;idx.set(k,i);lat.push(la);lon.push(lo);adj.push([])}return i};
   for(const w of els){
     const g=w.geometry;if(!g||g.length<2)continue;
-    const t=w.tags||{},h=t.highway;let road=false,m=1;
+    const t=w.tags||{},h=t.highway;if(t.access==='private'||t.access==='no'||t.foot==='no'||t.service==='driveway'||t.service==='parking_aisle')continue;let road=false,m=1;
     if(['residential','unclassified','service','living_street'].includes(h)||(h==='footway'&&(t.footway==='sidewalk'||t.footway==='crossing'))||(h==='cycleway'&&t.cycleway==='crossing')){road=true;m=mult}
     else if(h==='steps')m=1.3;
     for(let i=1;i<g.length;i++){
@@ -387,9 +388,12 @@ async function suggest(){
     if(!c){st.textContent='Allow location, or type a start area.';return}
     st.textContent='Getting paths and trails around the start…';
     const R=Math.min(7500,Math.round(.36*Dm+500));
-    const q='[out:json][timeout:60];way["highway"~"^(path|footway|bridleway|track|cycleway|pedestrian|steps|living_street|residential|unclassified|service)$"]["access"!~"^(private|no)$"]["foot"!="no"]["service"!~"^(driveway|parking_aisle)$"](around:'+R+','+c.lat+','+c.lng+');out tags geom qt;';
-    let els;
-    try{els=await overpass(q,45000)}catch(e){st.textContent='The path data service is busy. Try again in a minute.';return}
+    const q='[out:json][timeout:40];way["highway"~"^(path|footway|bridleway|track|cycleway|pedestrian|steps|living_street|residential|unclassified|service)$"](around:'+R+','+c.lat+','+c.lng+');out tags geom;';
+    let els=null;dbg=[];
+    for(let a=0;a<2&&!els;a++){
+      try{els=await overpass(q,40000)}catch(e){if(a===0){st.textContent='Path data service is slow, trying again…';await new Promise(r=>setTimeout(r,2500))}}
+    }
+    if(!els){st.textContent='The path data service is busy. Try again in a minute. ('+dbg.slice(-6).join(' · ')+')';return}
     if(!els.length){st.textContent='No paths found near there. Try a different start.';return}
     st.textContent='Building the path network…';await tick();
     const G=buildGraph(els,short);
