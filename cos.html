@@ -653,20 +653,22 @@ function setFS(on){
   setTimeout(()=>{map.invalidateSize();if(on&&$('ac').checked&&map.hasLayer(me))map.panTo(me.getLatLng())},150);
 }
 document.addEventListener('fullscreenchange',()=>{if(!document.fullscreenElement&&document.body.classList.contains('fs'))setFS(false)});
-function stopFollow(){if(fw!=null)navigator.geolocation.clearWatch(fw);fw=null;setWarn(null);$('fb').textContent='Start following';$('fb').className='go';$('fo').classList.remove('off');$('fso').classList.remove('off');unwake();setFS(false)}
+function stopFollow(){if(fw!=null)navigator.geolocation.clearWatch(fw);fw=null;try{localStorage.removeItem('cos_active_follow')}catch(e){}setWarn(null);$('fb').textContent='Start following';$('fb').className='go';$('fo').classList.remove('off');$('fso').classList.remove('off');unwake();setFS(false)}
+function persistFollow(done){try{localStorage.setItem('cos_active_follow',JSON.stringify({pts:fpts,name:activeFollowName||'Active route',done:done==null?fprev:done,t:Date.now()}))}catch(e){}}
+let activeFollowName='Active route',restoredFollow=false;
 $('fsb').onclick=()=>setFS(true);
 $('fsx').onclick=()=>setFS(false);
 $('fss').onclick=()=>{if(fw!=null)stopFollow();setFS(false)};
 $('fb').onclick=()=>{
   if(fw!=null)return stopFollow();
   fpts=path();if(fpts.length<2)return toast('Plot or load a route first');
-  fh=[];wstate=null;offN=0;backN=0;fprev=null;
+  fh=[];wstate=null;offN=0;backN=0;if(!restoredFollow)fprev=null;restoredFollow=false;activeFollowName='Active route';persistFollow(fprev==null?0:fprev);
   try{ac=ac||new(window.AudioContext||window.webkitAudioContext)();ac.resume()}catch(e){}
   fcum=[0];for(let i=1;i<fpts.length;i++)fcum[i]=fcum[i-1]+LL(fpts[i-1]).distanceTo(LL(fpts[i]));
   const tot=fcum[fcum.length-1];
   fw=navigator.geolocation.watchPosition(p=>{
     const ll=showMe(p);if($('ac').checked)map.panTo(ll);
-    const r=snapTo(ll,fprev),b=$('fs').querySelectorAll('b');fprev=r.done;
+    const r=snapTo(ll,fprev),b=$('fs').querySelectorAll('b');fprev=r.done;persistFollow(fprev);
     b[0].textContent=mi(r.done);b[1].textContent=mi(Math.max(0,tot-r.done));b[2].textContent=Math.round(r.off*3.28084)+' ft';
     $('fo').classList.toggle('off',r.off>40);
     const hb=$('fsbar').querySelectorAll('.st b');hb[0].textContent=b[0].textContent;hb[1].textContent=b[1].textContent;hb[2].textContent=b[2].textContent;$('fso').classList.toggle('off',r.off>40);
@@ -860,6 +862,17 @@ async function openFromHdsg(kind,id){
     const r=parseGpx(o.gpx);
     if(r.pts.length>1){loaded=r.pts;redraw();map.invalidateSize();map.fitBounds(line.getBounds(),{padding:[40,40]});tabTo('follow');$('back').hidden=false;toast('Loaded '+(o.name||'route'));return}
   }
+  // Restore a route that was being followed if the browser was suspended or reloaded.
+  try{
+    const a=JSON.parse(localStorage.getItem('cos_active_follow')||'null');
+    if(a&&Array.isArray(a.pts)&&a.pts.length>1&&Date.now()-a.t<7*24*60*60*1000){
+      loaded=a.pts;activeFollowName=a.name||'Active route';restoredFollow=true;fpts=a.pts;fcum=[0];for(let i=1;i<fpts.length;i++)fcum[i]=fcum[i-1]+LL(fpts[i-1]).distanceTo(LL(fpts[i]));fprev=Number.isFinite(a.done)?a.done:null;
+      redraw();map.invalidateSize();map.fitBounds(line.getBounds(),{padding:[40,40]});tabTo('follow');
+      $('fm').textContent='Your previous route has been restored. Tap Start following to resume GPS tracking.';
+      if(fprev!=null){const total=fcum[fcum.length-1],b=$('fs').querySelectorAll('b');b[0].textContent=mi(fprev);b[1].textContent=mi(Math.max(0,total-fprev));}
+      toast('Restored your previous route');return;
+    }
+  }catch(e){}
   if(navigator.geolocation)navigator.geolocation.getCurrentPosition(p=>map.setView(showMe(p),14),()=>{},{enableHighAccuracy:false,timeout:10000,maximumAge:60000});
 })();
 list();
