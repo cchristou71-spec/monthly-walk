@@ -317,11 +317,11 @@ function relPts(rel){
 }
 // Ask the Overpass mirrors, staggered; the first good answer wins and the rest are cancelled.
 async function racePublic(q,ms){
-  const ctls=OPS.map(()=>new AbortController());let won=false;
+  const ctls=PUBOPS.map(()=>new AbortController());let won=false;
   const timer=setTimeout(()=>ctls.forEach(c=>c.abort()),ms);
   try{
-    return await Promise.any(OPS.map(async(u,i)=>{
-      if(i)await new Promise(r=>setTimeout(r,i*1500));
+    return await Promise.any(PUBOPS.map(async(u,i)=>{
+      if(i)await new Promise(r=>setTimeout(r,i*1200));
       if(won)throw new Error('skipped');
       const r=await fetch(u,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'data='+encodeURIComponent(q),signal:ctls[i].signal});
       if(!r.ok)throw new Error('HTTP '+r.status);
@@ -333,28 +333,32 @@ async function racePublic(q,ms){
   }finally{clearTimeout(timer)}
 }
 const PUBR=16093;
-// Two light steps instead of one heavy one: (1) list nearby routes with just their tags and bounding boxes,
-// (2) fetch the full line only for the few that could plausibly be the right length.
+const PUBOPS=['https://overpass-api.de/api/interpreter','https://overpass.kumi.systems/api/interpreter','https://overpass.private.coffee/api/interpreter','https://overpass.openstreetmap.fr/api/interpreter'];
+// Two light steps: (1) list nearby routes with just tags and bounding boxes (exact route values, so the server can use its index),
+// (2) fetch the full line only for the few that could plausibly be the right length. The list is cached separately.
 async function publicRoutes(c,Dm){
-  const key='pub2:'+Math.round(c.lat*50)+','+Math.round(c.lng*50)+':'+Math.round(Dm/1609),hit=await tget(key);
+  const cell=Math.round(c.lat*50)+','+Math.round(c.lng*50),key='pub2:'+cell+':'+Math.round(Dm/1609),hit=await tget(key);
   if(hit&&hit.routes&&Date.now()-hit.t<7*864e5)return hit.routes;
-  const dy=PUBR/111195,dx=PUBR/(111195*Math.cos(c.lat*D2R));
-  const bb=[c.lat-dy,c.lng-dx,c.lat+dy,c.lng+dx].map(v=>v.toFixed(5)).join(',');
-  const f='[route~"^(hiking|foot|walking)$"][network!~"^(iwn|nwn)$"]';
-  const j1=await racePublic('[out:json][timeout:15];relation('+bb+')'+f+';out tags bb;',18000);
-  const cand=[];
-  for(const rel of j1.elements||[]){
-    if(rel.type!=='relation'||!rel.tags||!rel.bounds)continue;
-    const t=rel.tags;if(!(t.name||t.ref||t.description))continue;
-    const b=rel.bounds,diag=dm(b.minlat,b.minlon,b.maxlat,b.maxlon);
-    if(diag<.2*Dm||diag>1.35*Dm)continue;
-    const cy=Math.min(Math.max(c.lat,b.minlat),b.maxlat),cx=Math.min(Math.max(c.lng,b.minlon),b.maxlon);
-    cand.push({id:rel.id,away:dm(c.lat,c.lng,cy,cx)});
+  let all,h1=await tget('pub2l:'+cell);
+  if(h1&&h1.all&&Date.now()-h1.t<864e5)all=h1.all;
+  else{
+    const dy=PUBR/111195,dx=PUBR/(111195*Math.cos(c.lat*D2R));
+    const bb=[c.lat-dy,c.lng-dx,c.lat+dy,c.lng+dx].map(v=>v.toFixed(5)).join(',');
+    const q='[out:json][timeout:25];(relation[route=hiking]('+bb+');relation[route=foot]('+bb+');relation[route=walking]('+bb+'););out tags bb qt;';
+    let j1;try{j1=await racePublic(q,30000)}catch(e){e.step='step 1';throw e}
+    all=[];
+    for(const rel of j1.elements||[]){
+      if(rel.type!=='relation'||!rel.tags||!rel.bounds)continue;
+      const t=rel.tags;if(!(t.name||t.ref||t.description)||t.network==='iwn'||t.network==='nwn')continue;
+      const b=rel.bounds,cy=Math.min(Math.max(c.lat,b.minlat),b.maxlat),cx=Math.min(Math.max(c.lng,b.minlon),b.maxlon);
+      all.push({id:rel.id,diag:dm(b.minlat,b.minlon,b.maxlat,b.maxlon),away:dm(c.lat,c.lng,cy,cx)});
+    }
+    tput('pub2l:'+cell,{t:Date.now(),all});
   }
-  cand.sort((a,b)=>a.away-b.away);
+  const cand=all.filter(x=>x.diag>=.2*Dm&&x.diag<=1.35*Dm).sort((a,b)=>a.away-b.away);
   const ids=cand.slice(0,30).map(x=>x.id),routes=[];
   if(ids.length){
-    const j2=await racePublic('[out:json][timeout:20];relation(id:'+ids.join(',')+');out geom;',25000);
+    let j2;try{j2=await racePublic('[out:json][timeout:25];relation(id:'+ids.join(',')+');out geom;',30000)}catch(e){e.step='step 2';throw e}
     for(const rel of j2.elements||[]){
       if(rel.type!=='relation'||!rel.tags)continue;
       const t=rel.tags,name=t.name||t.ref||t.description;if(!name)continue;
@@ -430,7 +434,7 @@ async function suggest(retry){
       // The phone was locked or the app was backgrounded mid-search: quietly try once more.
       if(sugHidden&&!retry){sugHidden=false;return await suggest(true)}
       const why=e&&e.errors?[...new Set(e.errors.map(x=>x.name==='AbortError'?'timeout':x.message))].filter(m=>m!=='skipped').join(', '):(e&&e.message||'');
-      st.textContent='The route service is busy'+(why?' ('+why+')':'')+'. Tap Suggest routes again in a minute.';tput('sug:last',{t:Date.now(),txt,D});return;
+      st.textContent='The route service is busy'+(why?' ('+(e.step?e.step+': ':'')+why+')':'')+'. Tap Suggest routes again in a minute.';tput('sug:last',{t:Date.now(),txt,D});return;
     }
     const all=[];
     for(const r of routes){
