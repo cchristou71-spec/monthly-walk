@@ -112,7 +112,7 @@ body.fs #fsbar{display:flex}
   <div class="pane" id="p-suggest" hidden>
     <div class="row"><input id="sa" type="search" placeholder="Start: town, village or postcode (blank = map centre)" aria-label="Start area" enterkeyhint="go"></div>
     <div class="row"><input id="sm" type="number" inputmode="decimal" min="0.5" max="15" step="0.5" value="5" aria-label="Miles"><span>miles, approx.</span><button id="sgo" class="go">Suggest routes</button></div>
-    <p class="m" id="sst">Loops that start and finish at the same place, using footpaths, bridleways and trails. Roads are only used as short links, or more freely for walks of 2 miles or less.</p>
+    <p class="m" id="sst">Loops that start and finish at the same place, using footpaths, bridleways and trails. Roads (quieter ones preferred) are only used to link footpaths, or more freely for walks of 2 miles or less.</p>
     <div id="sres"></div>
   </div>
 
@@ -291,22 +291,30 @@ const D2R=Math.PI/180;
 const dm=(a,b,c,d)=>Math.hypot((c-a)*111195,(d-b)*111195*Math.cos((a+c)*D2R/2));
 const tick=()=>new Promise(r=>setTimeout(r,0));
 function buildGraph(els,short){
-  const idx=new Map(),lat=[],lon=[],adj=[],mult=short?1.5:6;
+  const idx=new Map(),lat=[],lon=[],adj=[];
+  const mQuiet=short?1.5:4,mLane=short?1.5:3,mTert=short?3:10,mSide=short?1.5:5;
   const node=(la,lo)=>{const k=la+','+lo;let i=idx.get(k);if(i===undefined){i=lat.length;idx.set(k,i);lat.push(la);lon.push(lo);adj.push([])}return i};
   for(const w of els){
     const g=w.geometry;if(!g||g.length<2)continue;
-    const t=w.tags||{},h=t.highway;if(t.access==='private'||t.access==='no'||t.foot==='no'||t.service==='driveway'||t.service==='parking_aisle')continue;let road=false,m=1;
-    if(['residential','unclassified','service','living_street'].includes(h)||(h==='footway'&&(t.footway==='sidewalk'||t.footway==='crossing'))||(h==='cycleway'&&t.cycleway==='crossing')){road=true;m=mult}
+    const t=w.tags||{},h=t.highway;if(!h)continue;
+    if(t.access==='private'||t.access==='no'||t.foot==='no'||t.service==='driveway'||t.service==='parking_aisle')continue;
+    let road=false,m=1;
+    if(h==='unclassified'){road=true;m=mLane}
+    else if(h==='residential'||h==='living_street'||h==='service'){road=true;m=mQuiet}
+    else if(h==='tertiary'||h==='tertiary_link'){road=true;m=mTert}
+    else if((h==='footway'&&(t.footway==='sidewalk'||t.footway==='crossing'))||(h==='cycleway'&&t.cycleway==='crossing')){road=true;m=mSide}
     else if(h==='steps')m=1.3;
     for(let i=1;i<g.length;i++){
       const a=node(g[i-1].lat,g[i-1].lon),b=node(g[i].lat,g[i].lon);if(a===b)continue;
+      if(adj[a].some(e=>e.to===b))continue;
       const len=dm(lat[a],lon[a],lat[b],lon[b]),id=a<b?a*2e6+b:b*2e6+a;
       adj[a].push({to:b,len,cost:len*m,road,id});adj[b].push({to:a,len,cost:len*m,road,id});
     }
   }
-  const n=lat.length,comp=new Int32Array(n).fill(-1),sizes=[];
+  const n=lat.length,comp=new Int32Array(n).fill(-1),sizes=[],pn=new Uint8Array(n);
+  for(let i=0;i<n;i++)pn[i]=adj[i].some(e=>!e.road)?1:0;
   for(let s=0;s<n;s++){if(comp[s]>=0)continue;const c=sizes.length;let cnt=0;const st=[s];comp[s]=c;while(st.length){const x=st.pop();cnt++;for(const e of adj[x])if(comp[e.to]<0){comp[e.to]=c;st.push(e.to)}}sizes.push(cnt)}
-  return{lat,lon,adj,n,comp,sizes,okc:null,gs:new Float64Array(n),stamp:new Int32Array(n),cl:new Int32Array(n),prev:new Int32Array(n),run:0};
+  return{lat,lon,adj,n,comp,sizes,pn,okc:null,gs:new Float64Array(n),stamp:new Int32Array(n),cl:new Int32Array(n),prev:new Int32Array(n),run:0};
 }
 function astar(G,s,t,used){
   const{adj,lat,lon,gs,stamp,cl,prev}=G,run=++G.run,tl=lat[t],tn=lon[t],hf=[],hn=[];
@@ -318,21 +326,22 @@ function astar(G,s,t,used){
     if(x===t){const p=[];for(let y=t;y!==-1;y=prev[y])p.push(y);return p.reverse()}
     for(const e of adj[x]){
       const y=e.to;if(cl[y]===run)continue;
-      const c=gs[x]+e.cost*(used&&used.has(e.id)?6:1);
+      const c=gs[x]+e.cost*(used&&used.has(e.id)?25:1);
       if(stamp[y]!==run||c<gs[y]){stamp[y]=run;gs[y]=c;prev[y]=x;push(c+dm(lat[y],lon[y],tl,tn),y)}
     }
   }
   return null;
 }
-function nearest(G,la,lo,maxM){
+function nearest(G,la,lo,maxM,pathOnly){
   const k=Math.cos(la*D2R);let best=-1,bd=1e18;
-  for(let i=0;i<G.n;i++){if(!G.okc[G.comp[i]])continue;const dy=(G.lat[i]-la)*111195,dx=(G.lon[i]-lo)*111195*k,d=dx*dx+dy*dy;if(d<bd){bd=d;best=i}}
+  for(let i=0;i<G.n;i++){if(!G.okc[G.comp[i]]||(pathOnly&&!G.pn[i]))continue;const dy=(G.lat[i]-la)*111195,dx=(G.lon[i]-lo)*111195*k,d=dx*dx+dy*dy;if(d<bd){bd=d;best=i}}
   return best>=0&&Math.sqrt(bd)<=maxM?best:-1;
 }
 function makeLoop(G,s,r,bearing){
   const la0=G.lat[s],lo0=G.lon[s],k=Math.cos(la0*D2R),b=bearing*D2R,cx=r*Math.sin(b),cy=r*Math.cos(b),seq=[s];
   for(const off of [90,180,270]){
-    const th=b+Math.PI+off*D2R,w=nearest(G,la0+(cy+r*Math.cos(th))/111195,lo0+(cx+r*Math.sin(th))/(111195*k),r*.6);
+    const th=b+Math.PI+off*D2R,wla=la0+(cy+r*Math.cos(th))/111195,wlo=lo0+(cx+r*Math.sin(th))/(111195*k);
+    let w=nearest(G,wla,wlo,r*.6,true);if(w<0)w=nearest(G,wla,wlo,r*.6,false);
     if(w<0||seq.includes(w))return null;seq.push(w);
   }
   seq.push(s);
@@ -347,7 +356,7 @@ function makeLoop(G,s,r,bearing){
   return len>0?{nodes,len,rep:rep/len,road:road/len,ids:seen}:null;
 }
 async function planLoops(G,s,Dm,short,onStep){
-  const found=[],bears=[0,45,90,135,180,225,270,315];
+  const found=[],bears=[0,30,60,90,120,150,180,210,240,270,300,330];
   for(let bi=0;bi<bears.length;bi++){
     if(onStep){onStep(bi+1,bears.length);await tick()}
     let r=Dm/(2*Math.PI)/1.3,best=null;
@@ -357,18 +366,44 @@ async function planLoops(G,s,Dm,short,onStep){
       const q=R.len/Dm;if(Math.abs(q-1)<=.08)break;
       r=Math.min(Dm/4,Math.max(Dm/(2*Math.PI)/3,r/Math.pow(q,.9)));
     }
-    if(best&&Math.abs(best.len/Dm-1)<=.25)found.push(best);
+    if(best&&Math.abs(best.len/Dm-1)<=.2)found.push(best);
   }
-  found.forEach(f=>f.score=Math.abs(f.len/Dm-1)*2+f.rep*2.5+f.road*(short?.3:1.2));
+  found.forEach(f=>f.score=Math.abs(f.len/Dm-1)*2+f.rep*4+f.road*(short?.3:3));
   found.sort((a,b)=>a.score-b.score);
+  const okRoad=f=>short||f.road<=.35;
+  let pool=found.filter(f=>f.rep<=.2&&okRoad(f));
+  if(!pool.length)pool=found.filter(f=>f.rep<=.35);
+  if(!pool.length)pool=found.slice();
   const pick=[];
-  for(const f of found){
-    if(f.rep>(short?.5:.35))continue;
+  for(const f of pool){
     const dup=pick.some(p=>{let sh=0;for(const id of f.ids)if(p.ids.has(id))sh++;return sh/Math.min(f.ids.size,p.ids.size)>.6});
     if(!dup)pick.push(f);if(pick.length===5)break;
   }
   if(!pick.length&&found.length)pick.push(found[0]);
   return pick;
+}
+const HW=['path','footway','bridleway','track','cycleway','pedestrian','steps','living_street','residential','unclassified','service','tertiary'];
+const tcache=new Map();
+async function fetchTile(ix,iy){
+  const key='ov2:'+ix+','+iy;
+  if(tcache.has(key))return tcache.get(key);
+  const c=await tget(key);
+  if(c&&c.els&&Date.now()-c.t<30*864e5){tcache.set(key,c.els);return c.els}
+  const s=ix*.02,w=iy*.03,q='[out:json][timeout:25][bbox:'+s.toFixed(5)+','+w.toFixed(5)+','+(s+.02).toFixed(5)+','+(w+.03).toFixed(5)+'];('+HW.map(h=>'way[highway='+h+'];').join('')+');out tags geom;';
+  const off=Math.floor(Math.random()*OPS.length);
+  for(let a=0;a<4;a++){
+    const u=OPS[(off+a)%OPS.length],nm=new URL(u).host.replace('overpass','op').replace('.systems',''),ctl=new AbortController(),t=setTimeout(()=>ctl.abort(),22000);
+    try{
+      const r=await fetch(u,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'data='+encodeURIComponent(q),signal:ctl.signal});
+      if(!r.ok)throw new Error('HTTP '+r.status);
+      const j=await r.json();
+      if(j.remark&&/error|timed out|memory/i.test(j.remark))throw new Error('busy');
+      const els=j.elements||[];tcache.set(key,els);tput(key,{t:Date.now(),els});return els;
+    }catch(e){dbg.push(nm+': '+(e.name==='AbortError'?'timeout':(e.message||e)))}
+    finally{clearTimeout(t)}
+    await new Promise(r=>setTimeout(r,700*(a+1)));
+  }
+  return null;
 }
 function sugPick(i){sugLines.forEach((l,j)=>{l.setStyle({weight:j===i?7:3,opacity:j===i?1:.35});if(j===i)l.bringToFront()});map.fitBounds(sugLines[i].getBounds(),{padding:[40,40]})}
 async function suggest(){
@@ -386,15 +421,23 @@ async function suggest(){
       c=L.latLng(+j[0].lat,+j[0].lon);
     }else c=await centre();
     if(!c){st.textContent='Allow location, or type a start area.';return}
-    st.textContent='Getting paths and trails around the start…';
     const R=Math.min(7500,Math.round(.36*Dm+500));
-    const mk=r=>{const dy=r/111195,dx=r/(111195*Math.cos(c.lat*D2R));
-      return '[out:json][timeout:25][bbox:'+(c.lat-dy).toFixed(5)+','+(c.lng-dx).toFixed(5)+','+(c.lat+dy).toFixed(5)+','+(c.lng+dx).toFixed(5)+'];('+['path','footway','bridleway','track','cycleway','pedestrian','steps','living_street','residential','unclassified','service'].map(h=>'way[highway='+h+'];').join('')+');out tags geom;'};
-    let els=null;dbg=[];
-    for(let a=0;a<3&&!els;a++){
-      try{els=await overpass(mk(a===0?R:R*(a===1?.8:.6)),28000)}catch(e){if(a<2){st.textContent='Path data service is slow, trying again with a smaller area…';await new Promise(r=>setTimeout(r,2000))}}
+    const dy=R/111195,dx=R/(111195*Math.cos(c.lat*D2R)),need=[];
+    for(let ix=Math.floor((c.lat-dy)/.02);ix<=Math.floor((c.lat+dy)/.02);ix++)for(let iy=Math.floor((c.lng-dx)/.03);iy<=Math.floor((c.lng+dx)/.03);iy++){
+      const cy=Math.min(Math.max(c.lat,ix*.02),ix*.02+.02),cx=Math.min(Math.max(c.lng,iy*.03),iy*.03+.03);
+      if(dm(c.lat,c.lng,cy,cx)<=R)need.push([ix,iy]);
     }
-    if(!els){st.textContent='The path data service is busy. Try again in a minute. (suggest v3 · '+dbg.slice(-9).join(' · ')+')';return}
+    dbg=[];let done=0,failed=0,startOk=true;const startKey=Math.floor(c.lat/.02)+','+Math.floor(c.lng/.03),els=[];
+    st.textContent='Loading path data… 0 of '+need.length;
+    let qi=0;
+    await Promise.all([0,1,2].map(async()=>{
+      while(qi<need.length){
+        const[ix,iy]=need[qi++],r=await fetchTile(ix,iy);
+        if(r)for(const w of r)els.push(w);else{failed++;if(ix+','+iy===startKey)startOk=false}
+        done++;st.textContent='Loading path data… '+done+' of '+need.length;
+      }
+    }));
+    if(!startOk||failed>need.length*.3){st.textContent='The path data service is busy ('+failed+' of '+need.length+' map sections did not load). Tap Suggest routes again: sections already loaded are saved, so it only fetches what is missing. (suggest v4 · '+dbg.slice(-3).join(' · ')+')';return}
     if(!els.length){st.textContent='No paths found near there. Try a different start.';return}
     st.textContent='Building the path network…';await tick();
     const G=buildGraph(els,short);
