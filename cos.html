@@ -388,10 +388,11 @@ async function suggest(){
     if(!c){st.textContent='Allow location, or type a start area.';return}
     st.textContent='Getting paths and trails around the start…';
     const R=Math.min(7500,Math.round(.36*Dm+500));
-    const q='[out:json][timeout:40];way["highway"~"^(path|footway|bridleway|track|cycleway|pedestrian|steps|living_street|residential|unclassified|service)$"](around:'+R+','+c.lat+','+c.lng+');out tags geom;';
+    const mk=r=>{const dy=r/111195,dx=r/(111195*Math.cos(c.lat*D2R));
+      return '[out:json][timeout:25][bbox:'+(c.lat-dy).toFixed(5)+','+(c.lng-dx).toFixed(5)+','+(c.lat+dy).toFixed(5)+','+(c.lng+dx).toFixed(5)+'];('+['path','footway','bridleway','track','cycleway','pedestrian','steps','living_street','residential','unclassified','service'].map(h=>'way[highway='+h+'];').join('')+');out tags geom;'};
     let els=null;dbg=[];
-    for(let a=0;a<2&&!els;a++){
-      try{els=await overpass(q,40000)}catch(e){if(a===0){st.textContent='Path data service is slow, trying again…';await new Promise(r=>setTimeout(r,2500))}}
+    for(let a=0;a<3&&!els;a++){
+      try{els=await overpass(mk(a===0?R:R*(a===1?.8:.6)),28000)}catch(e){if(a<2){st.textContent='Path data service is slow, trying again with a smaller area…';await new Promise(r=>setTimeout(r,2000))}}
     }
     if(!els){st.textContent='The path data service is busy. Try again in a minute. ('+dbg.slice(-6).join(' · ')+')';return}
     if(!els.length){st.textContent='No paths found near there. Try a different start.';return}
