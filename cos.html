@@ -41,6 +41,8 @@ body{display:flex;flex-direction:column;font:15px/1.35 system-ui,-apple-system,"
 button{font:inherit;padding:8px 12px;border:1px solid var(--line);background:#fff;border-radius:8px;color:var(--ink)}
 button.on{background:var(--ink);color:#fff;border-color:var(--ink)}
 button.go{background:var(--route);border-color:var(--route);color:#fff;font-weight:700}
+#fpill{display:none;position:absolute;z-index:1000;left:10px;bottom:12px;align-items:center;gap:10px;background:#fffffff2;border:1px solid var(--line);border-radius:999px;padding:5px 6px 5px 14px;font-weight:700;box-shadow:0 1px 4px #0003}
+body.following:not(.fs) #fpill{display:flex}
 button.stop{background:var(--rec);border-color:var(--rec);color:#fff;font-weight:700}
 button:disabled{opacity:.5}
 button:focus-visible,input:focus-visible,.tab:focus-visible{outline:3px solid #1c7ed6;outline-offset:2px}
@@ -86,6 +88,7 @@ body.fs #fsbar{display:flex}
   <div id="fsbar"><div class="st"><div><b>–</b><span>Done</span></div><div><b>–</b><span>Left</span></div><div id="fso"><b>–</b><span>Off route</span></div></div><button id="fss" class="stop" aria-label="Stop following">Stop</button><button id="fsx" aria-label="Exit full screen">&#10005;</button></div>
   <button id="loc" aria-label="Show my location">&#9678;</button>
   <div id="warn" role="alert" hidden></div>
+  <div id="fpill"><span>&#9679; Following</span><button id="fpx" class="stop">Stop</button></div>
 </div>
 <div id="panel">
   <div id="tabs" role="tablist">
@@ -118,7 +121,7 @@ body.fs #fsbar{display:flex}
 
   <div class="pane" id="p-follow" hidden>
     <div class="row"><a id="back" href="./" hidden style="font-weight:600;color:var(--green);padding:6px 0">&larr; Back to HDSG Walks</a></div>
-    <div class="row"><button id="fb" class="go">Start following</button><button id="fsb">Full screen map</button><span class="m" id="fm">Uses the route on the map. Keep the screen on so warnings can sound.</span></div>
+    <div class="row"><button id="fb" class="go">Start following</button><button id="fsb">Full screen map</button><button id="fclr">Clear route</button><span class="m" id="fm">Uses the route on the map. Keep the screen on so warnings can sound.</span></div>
     <div class="stat" id="fs"><div><b>–</b><span>Done</span></div><div><b>–</b><span>Left</span></div><div id="fo"><b>–</b><span>Off route</span></div></div>
   </div>
 
@@ -330,78 +333,137 @@ async function racePublic(q,ms){
   }finally{clearTimeout(timer)}
 }
 const PUBR=16093;
-async function publicRoutes(c){
-  const key='pub1:'+Math.round(c.lat*50)+','+Math.round(c.lng*50),hit=await tget(key);
+// Two light steps instead of one heavy one: (1) list nearby routes with just their tags and bounding boxes,
+// (2) fetch the full line only for the few that could plausibly be the right length.
+async function publicRoutes(c,Dm){
+  const key='pub2:'+Math.round(c.lat*50)+','+Math.round(c.lng*50)+':'+Math.round(Dm/1609),hit=await tget(key);
   if(hit&&hit.routes&&Date.now()-hit.t<7*864e5)return hit.routes;
-  const q='[out:json][timeout:20];relation(around:'+PUBR+','+c.lat.toFixed(5)+','+c.lng.toFixed(5)+')[route~"^(hiking|foot|walking)$"][network!~"^(iwn|nwn)$"];out geom;';
-  const j=await racePublic(q,22000),routes=[];
-  for(const rel of j.elements||[]){
-    if(rel.type!=='relation'||!rel.tags)continue;
-    const t=rel.tags,name=t.name||t.ref||t.description;if(!name)continue;
-    const pts=relPts(rel);if(pts.length<5)continue;
-    const distance=plen(pts);if(distance<500)continue;
-    routes.push({id:rel.id,name,pts:thin(pts,15),distance});
+  const dy=PUBR/111195,dx=PUBR/(111195*Math.cos(c.lat*D2R));
+  const bb=[c.lat-dy,c.lng-dx,c.lat+dy,c.lng+dx].map(v=>v.toFixed(5)).join(',');
+  const f='[route~"^(hiking|foot|walking)$"][network!~"^(iwn|nwn)$"]';
+  const j1=await racePublic('[out:json][timeout:15];relation('+bb+')'+f+';out tags bb;',18000);
+  const cand=[];
+  for(const rel of j1.elements||[]){
+    if(rel.type!=='relation'||!rel.tags||!rel.bounds)continue;
+    const t=rel.tags;if(!(t.name||t.ref||t.description))continue;
+    const b=rel.bounds,diag=dm(b.minlat,b.minlon,b.maxlat,b.maxlon);
+    if(diag<.2*Dm||diag>1.35*Dm)continue;
+    const cy=Math.min(Math.max(c.lat,b.minlat),b.maxlat),cx=Math.min(Math.max(c.lng,b.minlon),b.maxlon);
+    cand.push({id:rel.id,away:dm(c.lat,c.lng,cy,cx)});
+  }
+  cand.sort((a,b)=>a.away-b.away);
+  const ids=cand.slice(0,30).map(x=>x.id),routes=[];
+  if(ids.length){
+    const j2=await racePublic('[out:json][timeout:20];relation(id:'+ids.join(',')+');out geom;',25000);
+    for(const rel of j2.elements||[]){
+      if(rel.type!=='relation'||!rel.tags)continue;
+      const t=rel.tags,name=t.name||t.ref||t.description;if(!name)continue;
+      const pts=relPts(rel);if(pts.length<5)continue;
+      const distance=plen(pts);if(distance<500)continue;
+      routes.push({id:rel.id,name,pts:thin(pts,15),distance});
+    }
   }
   tput(key,{t:Date.now(),routes});
   return routes;
 }
+let sugBusy=false,sugHidden=false,sugMarker=null,sugNeedsDraw=false;
+document.addEventListener('visibilitychange',()=>{if(sugBusy&&document.visibilityState==='hidden')sugHidden=true});
 function sugPick(i){sugLines.forEach((l,j)=>{l.setStyle({weight:j===i?7:4,opacity:j===i?1:.4});if(j===i)l.bringToFront()});map.fitBounds(sugLines[i].getBounds(),{padding:[40,40]})}
-async function suggest(){
+function sugDraw(){
+  if(!sugLines.length)return;
+  sugLayer.clearLayers();if(sugMarker)sugMarker.addTo(sugLayer);
+  sugLines.forEach(l=>l.addTo(sugLayer));
+  map.fitBounds(L.featureGroup(sugLines).getBounds(),{padding:[40,40]});
+}
+// Draws a finished (or restored) search. draw=false builds the list but leaves the map alone.
+function renderSug(s,draw,prefix){
+  const st=$('sst'),box=$('sres'),from=s.from,D=s.D;
+  sugLayer.clearLayers();sugLines=[];sugMarker=null;box.innerHTML='';
+  const more=document.createElement('p');more.className='m';more.textContent='More published walks on other sites: ';
+  [['Wikiloc','wikiloc.com'],['Walking Englishman','walkingenglishman.com'],['Walkr','walkr.co.uk']].forEach((site,i)=>{if(i)more.append(' · ');const a=document.createElement('a');a.textContent=site[0];a.href='https://www.google.com/search?q='+encodeURIComponent('site:'+site[1]+' walking routes '+from);a.target='_blank';a.rel='noopener';a.style.color='var(--green)';more.append(a)});
+  if(!s.list.length){st.textContent=(prefix||'')+'No published walking routes found within 10 miles of '+from+'. Try a nearby town or village.';box.append(more);return}
+  sugMarker=L.circleMarker([s.c.lat,s.c.lng],{radius:8,color:'#fff',weight:3,fillColor:'#2b8a3e',fillOpacity:1});
+  s.list.forEach((r,i)=>{
+    const color=SUGCOL[i%5],ln=L.polyline(r.pts,{color,weight:4,opacity:.9});sugLines.push(ln);
+    const d=document.createElement('div');d.className='it';
+    const title=document.createElement('b');const sw=document.createElement('span');sw.className='sw';sw.style.background=color;title.append(sw,r.name);
+    const meta=document.createElement('span');meta.className='m';meta.textContent=mi(r.distance)+' · passes '+(r.away/1609.344).toFixed(1)+' mi from '+from+' · OpenStreetMap';
+    const actions=document.createElement('div');
+    ['Preview','Follow','Save','Export GPX','Source'].forEach(l=>{const b=document.createElement('button');b.textContent=l;actions.append(b)});
+    const[pv,fo,sv,ex,src]=actions.querySelectorAll('button');
+    pv.onclick=()=>{if(!sugLayer.hasLayer(ln)){sugNeedsDraw=false;sugDraw()}sugPick(i)};
+    fo.onclick=()=>{show({pts:r.pts});tabTo('follow')};
+    sv.onclick=()=>{save(r.name,r.pts,'route');toast('Saved')};
+    ex.onclick=()=>dl(r.name,r.pts);
+    src.onclick=()=>window.open('https://www.openstreetmap.org/relation/'+r.id,'_blank','noopener');
+    d.append(title,meta,actions);box.append(d);
+  });
+  box.append(more);
+  if(draw)sugDraw();
+  st.textContent=(prefix||'')+s.list.length+(s.list.length===1?' route':' routes')+' near '+from+(s.near?', closest to '+D+' mi.':'. Few are close to '+D+' mi, so these are the nearest lengths.')+' From OpenStreetMap community mapping. Check access and conditions before you set off.';
+}
+async function suggest(retry){
   const btn=$('sgo'),st=$('sst'),box=$('sres');
   let D=parseFloat($('sm').value);if(!(D>0)){toast('Enter how many miles you want');return}
   D=Math.min(15,Math.max(.5,D));$('sm').value=D;
-  const Dm=D*1609.344;
-  btn.disabled=true;sugLayer.clearLayers();sugLines=[];box.innerHTML='';
+  const Dm=D*1609.344,txt=$('sa').value.trim();
+  if(!retry)sugHidden=false;
+  sugBusy=true;btn.disabled=true;sugLayer.clearLayers();sugLines=[];box.innerHTML='';
+  tput('sug:last',{t:Date.now(),txt,D,pending:true});wake();
   try{
-    const txt=$('sa').value.trim();let c;
+    let c;
     st.textContent='Finding the start…';
     if(txt){
       let j=[];try{j=await nom({text:txt,limit:1})}catch(e){}
-      if(!j.length){st.textContent='Could not find "'+txt+'". Try a nearby town or a postcode.';return}
+      if(!j.length){
+        if(sugHidden&&!retry){sugHidden=false;return await suggest(true)}
+        st.textContent='Could not find "'+txt+'". Try a nearby town or a postcode.';tput('sug:last',{t:Date.now(),txt,D});return;
+      }
       c=L.latLng(+j[0].lat,+j[0].lon);
     }else c=await centre();
-    if(!c){st.textContent='Allow location, or type a start area.';return}
+    if(!c){st.textContent='Allow location, or type a start area.';tput('sug:last',{t:Date.now(),txt,D});return}
     const from=txt||'the map centre';
     st.textContent='Searching published walking routes…';
     let routes;
-    try{routes=await publicRoutes(c)}
-    catch(e){st.textContent='The route service is busy. Tap Suggest routes again in a minute.';return}
+    try{routes=await publicRoutes(c,Dm)}
+    catch(e){
+      // The phone was locked or the app was backgrounded mid-search: quietly try once more.
+      if(sugHidden&&!retry){sugHidden=false;return await suggest(true)}
+      const why=e&&e.errors?[...new Set(e.errors.map(x=>x.name==='AbortError'?'timeout':x.message))].filter(m=>m!=='skipped').join(', '):(e&&e.message||'');
+      st.textContent='The route service is busy'+(why?' ('+why+')':'')+'. Tap Suggest routes again in a minute.';tput('sug:last',{t:Date.now(),txt,D});return;
+    }
     const all=[];
     for(const r of routes){
       let away=1e12;for(const p of r.pts){const d=dm(c.lat,c.lng,p[0],p[1]);if(d<away)away=d}
-      if(away<=PUBR)all.push({...r,away,ratio:r.distance/Dm});
+      if(away<=PUBR)all.push({id:r.id,name:r.name,pts:r.pts,distance:r.distance,away,ratio:r.distance/Dm});
     }
     all.forEach(r=>r.score=Math.abs(r.ratio-1)+r.away/40000);
     all.sort((a,b)=>a.score-b.score);
     let list=all.filter(r=>r.ratio>=.65&&r.ratio<=1.35).slice(0,15),near=true;
     if(list.length<3){list=all.slice(0,10);near=false}
-    const more=document.createElement('p');more.className='m';more.textContent='More published walks on other sites: ';
-    [['Wikiloc','wikiloc.com'],['Walking Englishman','walkingenglishman.com'],['Walkr','walkr.co.uk']].forEach((site,i)=>{if(i)more.append(' · ');const a=document.createElement('a');a.textContent=site[0];a.href='https://www.google.com/search?q='+encodeURIComponent('site:'+site[1]+' walking routes '+from);a.target='_blank';a.rel='noopener';a.style.color='var(--green)';more.append(a)});
-    if(!list.length){st.textContent='No published walking routes found within 10 miles of '+from+'. Try a nearby town or village.';box.append(more);return}
-    L.circleMarker([c.lat,c.lng],{radius:8,color:'#fff',weight:3,fillColor:'#2b8a3e',fillOpacity:1}).addTo(sugLayer);
-    list.forEach((r,i)=>{
-      const color=SUGCOL[i%5],ln=L.polyline(r.pts,{color,weight:4,opacity:.9}).addTo(sugLayer);sugLines.push(ln);
-      const d=document.createElement('div');d.className='it';
-      const title=document.createElement('b');const sw=document.createElement('span');sw.className='sw';sw.style.background=color;title.append(sw,r.name);
-      const meta=document.createElement('span');meta.className='m';meta.textContent=mi(r.distance)+' · passes '+(r.away/1609.344).toFixed(1)+' mi from '+from+' · OpenStreetMap';
-      const actions=document.createElement('div');
-      ['Preview','Follow','Save','Export GPX','Source'].forEach(l=>{const b=document.createElement('button');b.textContent=l;actions.append(b)});
-      const[pv,fo,sv,ex,src]=actions.querySelectorAll('button');
-      pv.onclick=()=>sugPick(i);
-      fo.onclick=()=>{show({pts:r.pts});tabTo('follow')};
-      sv.onclick=()=>{save(r.name,r.pts,'route');toast('Saved')};
-      ex.onclick=()=>dl(r.name,r.pts);
-      src.onclick=()=>window.open('https://www.openstreetmap.org/relation/'+r.id,'_blank','noopener');
-      d.append(title,meta,actions);box.append(d);
-    });
-    box.append(more);
-    map.fitBounds(L.featureGroup(sugLines).getBounds(),{padding:[40,40]});
-    st.textContent=list.length+(list.length===1?' route':' routes')+' near '+from+(near?', closest to '+D+' mi.':'. Few are close to '+D+' mi, so these are the nearest lengths.')+' From OpenStreetMap community mapping. Check access and conditions before you set off.';
-  }finally{btn.disabled=false}
+    list=list.map(r=>({id:r.id,name:r.name,pts:r.pts,distance:r.distance,away:r.away}));
+    const s={t:Date.now(),txt,D,from,c:{lat:c.lat,lng:c.lng},list,near};
+    tput('sug:last',s);renderSug(s,true);
+  }finally{sugBusy=false;btn.disabled=false;unwake()}
 }
-$('sgo').onclick=suggest;
+$('sgo').onclick=()=>suggest();
 $('sa').onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();suggest()}};
 $('sm').onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();suggest()}};
+document.querySelector('.tab[data-t="suggest"]').addEventListener('click',()=>{if(sugNeedsDraw){sugNeedsDraw=false;sugDraw()}});
+// After a reload (phone locked, browser dropped the page): bring the last search back, or finish an unfinished one.
+(async()=>{
+  const s=await tget('sug:last');if(!s)return;
+  if(s.txt)$('sa').value=s.txt;if(s.D)$('sm').value=s.D;
+  if(s.pending){
+    let a=null;try{a=localStorage.getItem('cos_active_follow')}catch(e){}
+    if(!a){tabTo('suggest');suggest(true)}
+    return;
+  }
+  if(s.list&&s.from&&Date.now()-s.t<2*864e5){
+    renderSug(s,false,'Your last search. ');
+    if(tab==='suggest')sugDraw();else sugNeedsDraw=true;
+  }
+})();
 
 /* ---------- location + wake lock ---------- */
 const me=L.circleMarker([0,0],{radius:8,color:'#fff',weight:3,fillColor:'#1c7ed6',fillOpacity:1});
@@ -463,11 +525,13 @@ function setFS(on){
   setTimeout(()=>{map.invalidateSize();if(on&&$('ac').checked&&map.hasLayer(me))map.panTo(me.getLatLng())},150);
 }
 document.addEventListener('fullscreenchange',()=>{if(!document.fullscreenElement&&document.body.classList.contains('fs'))setFS(false)});
-function stopFollow(){if(fw!=null)navigator.geolocation.clearWatch(fw);fw=null;try{localStorage.removeItem('cos_active_follow')}catch(e){}setWarn(null);$('fb').textContent='Start following';$('fb').className='go';$('fo').classList.remove('off');$('fso').classList.remove('off');unwake();setFS(false)}
+function stopFollow(){if(fw!=null)navigator.geolocation.clearWatch(fw);fw=null;document.body.classList.remove('following');try{localStorage.removeItem('cos_active_follow')}catch(e){}setWarn(null);$('fb').textContent='Start following';$('fb').className='go';$('fo').classList.remove('off');$('fso').classList.remove('off');unwake();setFS(false)}
 function persistFollow(done){try{localStorage.setItem('cos_active_follow',JSON.stringify({pts:fpts,name:activeFollowName||'Active route',done:done==null?fprev:done,t:Date.now()}))}catch(e){}}
 let activeFollowName='Active route',restoredFollow=false;
 $('fsb').onclick=()=>setFS(true);
 $('fsx').onclick=()=>setFS(false);
+$('fpx').onclick=()=>stopFollow();
+$('fclr').onclick=()=>{if(fw!=null)stopFollow();try{localStorage.removeItem('cos_active_follow')}catch(e){}clearPlan();fpts=[];fprev=null;restoredFollow=false;sugLayer.clearLayers();$('fm').textContent='Route cleared. Plot, load or pick a route to follow.';document.querySelectorAll('#fs b,#fsbar .st b').forEach(b=>b.textContent='–')};
 $('fss').onclick=()=>{if(fw!=null)stopFollow();setFS(false)};
 $('fb').onclick=()=>{
   if(fw!=null)return stopFollow();
@@ -484,7 +548,7 @@ $('fb').onclick=()=>{
     const hb=$('fsbar').querySelectorAll('.st b');hb[0].textContent=b[0].textContent;hb[1].textContent=b[1].textContent;hb[2].textContent=b[2].textContent;$('fso').classList.toggle('off',r.off>40);
     checkWarn(ll,r);
   },gerr,{enableHighAccuracy:true,maximumAge:2000});
-  $('fb').textContent='Stop following';$('fb').className='stop';wake();
+  $('fb').textContent='Stop following';$('fb').className='stop';document.body.classList.add('following');wake();
 };
 
 /* ---------- record ---------- */
