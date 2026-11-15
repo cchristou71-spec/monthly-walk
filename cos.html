@@ -116,6 +116,11 @@ body.fs #fsbar{display:flex}
     <div class="row"><input id="sa" type="search" placeholder="Start: town, village or postcode (blank = map centre)" aria-label="Start area" enterkeyhint="go"></div>
     <div class="row"><input id="sm" type="number" inputmode="decimal" min="0.5" max="15" step="0.5" value="5" aria-label="Miles"><span>miles, approx.</span><button id="sgo" class="go">Suggest routes</button></div>
     <p class="m" id="sst">Finds walking routes already published by others (OpenStreetMap community routes) near your start, closest to the miles you enter.</p>
+    <p class="m" style="font-weight:700;margin:12px 0 4px">Add your own route</p>
+    <div class="row"><input id="lk" type="url" placeholder="Paste a link (GPX file, Komoot, AllTrails…)" aria-label="Route link" enterkeyhint="go"><button id="lkgo">Load link</button></div>
+    <div class="row"><button id="upl" type="button">Upload GPX file</button><input id="upf" type="file" accept=".gpx,.xml,application/gpx+xml,application/xml,text/xml,application/octet-stream" hidden></div>
+    <p class="m" id="lkst"></p>
+    <div id="lkres"></div>
     <div id="sres"></div>
   </div>
 
@@ -468,6 +473,91 @@ document.querySelector('.tab[data-t="suggest"]').addEventListener('click',()=>{i
     if(tab==='suggest')sugDraw();else sugNeedsDraw=true;
   }
 })();
+
+/* ---------- add your own route: GPX file or link ---------- */
+const xLayer=L.layerGroup().addTo(map);
+const LINKFAIL='Could not read a route from that link. Sites like Komoot and AllTrails keep route lines behind their app or login. Open the route there, download the GPX, then use Upload GPX file.';
+function addExtra(name,pts,src){
+  if(pts.length>4000)pts=thin(pts,12);
+  const ll=pts.map(p=>[p[0],p[1]]),ln=L.polyline(ll,{color:'#d6336c',weight:5,opacity:.9}).addTo(xLayer);
+  const d=document.createElement('div');d.className='it';
+  const title=document.createElement('b');title.textContent=name;
+  const meta=document.createElement('span');meta.className='m';meta.textContent=mi(plen(ll))+' · '+src;
+  const actions=document.createElement('div');
+  ['Preview','Follow','Save','Export GPX','Remove'].forEach(l=>{const b=document.createElement('button');b.textContent=l;actions.append(b)});
+  const[pv,fo,sv,ex,rm]=actions.querySelectorAll('button');
+  pv.onclick=()=>{if(!xLayer.hasLayer(ln))ln.addTo(xLayer);map.fitBounds(ln.getBounds(),{padding:[40,40]})};
+  fo.onclick=()=>{xLayer.clearLayers();show({pts:ll});tabTo('follow')};
+  sv.onclick=()=>{save(name,ll,'route');toast('Saved')};
+  ex.onclick=()=>dl(name,ll);
+  rm.onclick=()=>{xLayer.removeLayer(ln);d.remove()};
+  d.append(title,meta,actions);$('lkres').prepend(d);
+  map.fitBounds(ln.getBounds(),{padding:[40,40]});
+}
+async function getText(u,ms){
+  const c=new AbortController(),t=setTimeout(()=>c.abort(),ms);
+  try{const r=await fetch(u,{signal:c.signal});if(!r.ok)throw new Error('HTTP '+r.status);return await r.text()}
+  finally{clearTimeout(t)}
+}
+// Best effort for web pages: look for embedded coordinate lists and keep the longest unbroken run.
+function scrapeCoords(txt){
+  const found=[];let m;
+  const re1=/"lat"\s*:\s*(-?\d{1,2}\.\d+)\s*,\s*"(?:lng|lon|long)"\s*:\s*(-?\d{1,3}\.\d+)/g;
+  while((m=re1.exec(txt)))found.push([+m[1],+m[2]]);
+  if(found.length<20){
+    found.length=0;
+    const re2=/"(?:lng|lon|long)"\s*:\s*(-?\d{1,3}\.\d+)\s*,\s*"lat"\s*:\s*(-?\d{1,2}\.\d+)/g;
+    while((m=re2.exec(txt)))found.push([+m[2],+m[1]]);
+  }
+  if(found.length<20){
+    found.length=0;
+    const re3=/\[\s*(-?\d{1,3}\.\d{3,})\s*,\s*(-?\d{1,2}\.\d{3,})(?:\s*,\s*-?\d+(?:\.\d+)?)?\s*\]/g;
+    while((m=re3.exec(txt))){const lat=+m[2],lon=+m[1];if(lat>=35&&lat<=72&&lon>=-25&&lon<=40)found.push([lat,lon])}
+  }
+  let best=[],run=[];
+  for(const p of found){
+    if(run.length&&dm(run[run.length-1][0],run[run.length-1][1],p[0],p[1])>2000){if(run.length>best.length)best=run;run=[]}
+    run.push(p);
+  }
+  if(run.length>best.length)best=run;
+  return best.length>=20?best:null;
+}
+async function loadLink(){
+  const st=$('lkst');let u=$('lk').value.trim();if(!u)return;
+  if(!/^https?:\/\//i.test(u))u='https://'+u;
+  try{new URL(u)}catch(e){st.textContent='That does not look like a link.';return}
+  $('lkgo').disabled=true;st.textContent='Fetching the link…';
+  try{
+    let txt=null,relay=false;
+    try{txt=await getText(u,15000)}catch(e){}
+    if(!txt){
+      st.textContent='Trying a free public relay (it sees the link you pasted)…';
+      try{txt=await getText('https://api.allorigins.win/raw?url='+encodeURIComponent(u),20000);relay=true}catch(e){}
+    }
+    if(!txt){st.textContent=LINKFAIL;return}
+    let pts=null,name='';
+    if(/<(trkpt|rtept)\b/i.test(txt)){const r=parseGpx(txt);pts=r.pts;name=r.name}
+    else{pts=scrapeCoords(txt);const t=txt.match(/<title[^>]*>([^<]{3,120})<\/title>/i);name=t?t[1].replace(/\s*[|\u2013-]\s*(komoot|alltrails).*$/i,'').trim():''}
+    if(!pts||pts.length<2){st.textContent=LINKFAIL;return}
+    addExtra(name||'Linked route',pts,'from link'+(relay?' (via relay)':''));
+    st.textContent='Route loaded from the link. Check it looks right on the map.';$('lk').value='';
+  }finally{$('lkgo').disabled=false}
+}
+$('lkgo').onclick=loadLink;
+$('lk').onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();loadLink()}};
+$('upl').onclick=()=>$('upf').click();
+$('upf').onchange=async e=>{
+  const st=$('lkst');
+  for(const f of e.target.files){
+    try{
+      const r=parseGpx(await f.text());
+      if(r.pts.length<2){st.textContent='No route found in '+f.name+'. It needs to be a GPX file.';continue}
+      addExtra(r.name||f.name.replace(/\.gpx$/i,''),r.pts,'uploaded file');
+      st.textContent='Loaded '+f.name+'.';
+    }catch(err){st.textContent='Could not read '+f.name+'.'}
+  }
+  e.target.value='';
+};
 
 /* ---------- location + wake lock ---------- */
 const me=L.circleMarker([0,0],{radius:8,color:'#fff',weight:3,fillColor:'#1c7ed6',fillOpacity:1});
