@@ -112,7 +112,7 @@ body.fs #fsbar{display:flex}
   <div class="pane" id="p-suggest" hidden>
     <div class="row"><input id="sa" type="search" placeholder="Start: town, village or postcode (blank = map centre)" aria-label="Start area" enterkeyhint="go"></div>
     <div class="row"><input id="sm" type="number" inputmode="decimal" min="0.5" max="15" step="0.5" value="5" aria-label="Miles"><span>miles, approx.</span><button id="sgo" class="go">Suggest routes</button></div>
-    <p class="m" id="sst">Loops that start and finish at the same place, using footpaths, bridleways and trails. Roads (quieter ones preferred) are only used to link footpaths, or more freely for walks of 2 miles or less.</p>
+    <p class="m" id="sst">Finds walking routes already published by others (OpenStreetMap community routes) near your start, closest to the miles you enter.</p>
     <div id="sres"></div>
   </div>
 
@@ -283,251 +283,75 @@ $('imp').onchange=async e=>{
 };
 
 
-/* ---------- suggest routes: loops from a start, paths first ---------- */
+/* ---------- suggest routes: walks already published on other sites ---------- */
 const sugLayer=L.layerGroup().addTo(map);
-const sharedLayer=L.layerGroup().addTo(map);
 let sugLines=[];
-const SUGCOL=['#1c7ed6','#9c36b6','#e8590c','#2b8a3e','#c2255c'];
+const SUGCOL=['#7048e8','#0b7285','#a61e4d','#5c940d','#d9480f'];
 const D2R=Math.PI/180;
 const dm=(a,b,c,d)=>Math.hypot((c-a)*111195,(d-b)*111195*Math.cos((a+c)*D2R/2));
-const tick=()=>new Promise(r=>setTimeout(r,0));
-function buildGraph(els,short){
-  const idx=new Map(),lat=[],lon=[],adj=[];
-  const mQuiet=short?1.5:4,mLane=short?1.5:3,mTert=short?3:10,mSide=short?1.5:5;
-  const node=(la,lo)=>{const k=la+','+lo;let i=idx.get(k);if(i===undefined){i=lat.length;idx.set(k,i);lat.push(la);lon.push(lo);adj.push([])}return i};
-  for(const w of els){
-    const g=w.geometry;if(!g||g.length<2)continue;
-    const t=w.tags||{},h=t.highway;if(!h)continue;
-    if(t.access==='private'||t.access==='no'||t.foot==='no'||t.service==='driveway'||t.service==='parking_aisle')continue;
-    let road=false,m=1;
-    if(h==='unclassified'){road=true;m=mLane}
-    else if(h==='residential'||h==='living_street'||h==='service'){road=true;m=mQuiet}
-    else if(h==='tertiary'||h==='tertiary_link'){road=true;m=mTert}
-    else if((h==='footway'&&(t.footway==='sidewalk'||t.footway==='crossing'))||(h==='cycleway'&&t.cycleway==='crossing')){road=true;m=mSide}
-    else if(h==='steps')m=1.3;
-    for(let i=1;i<g.length;i++){
-      const a=node(g[i-1].lat,g[i-1].lon),b=node(g[i].lat,g[i].lon);if(a===b)continue;
-      if(adj[a].some(e=>e.to===b))continue;
-      const len=dm(lat[a],lon[a],lat[b],lon[b]),id=a<b?a*2e6+b:b*2e6+a;
-      adj[a].push({to:b,len,cost:len*m,road,id});adj[b].push({to:a,len,cost:len*m,road,id});
+const plen=p=>{let s=0;for(let i=1;i<p.length;i++)s+=dm(p[i-1][0],p[i-1][1],p[i][0],p[i][1]);return s};
+function thin(p,min){const o=[p[0]];for(let i=1;i<p.length-1;i++){const q=o[o.length-1];if(dm(q[0],q[1],p[i][0],p[i][1])>=min)o.push(p[i])}o.push(p[p.length-1]);return o}
+// Join a relation's way members end to end into one line, flipping ways as needed.
+function relPts(rel){
+  const ways=[];
+  for(const m of rel.members||[])if(m.type==='way'&&m.geometry&&m.geometry.length>1)ways.push(m.geometry.map(x=>[+x.lat,+x.lon]));
+  if(!ways.length)return[];
+  if(ways.length>1){
+    const a=ways[0],b=ways[1],ends=[b[0],b[b.length-1]];
+    const dd=pt=>Math.min(...ends.map(e=>dm(pt[0],pt[1],e[0],e[1])));
+    if(dd(a[0])<dd(a[a.length-1]))a.reverse();
+  }
+  const pts=[];
+  for(const g of ways){
+    if(pts.length){
+      const e=pts[pts.length-1];
+      if(dm(e[0],e[1],g[g.length-1][0],g[g.length-1][1])<dm(e[0],e[1],g[0][0],g[0][1]))g.reverse();
+      if(dm(e[0],e[1],g[0][0],g[0][1])<35)g.shift();
     }
+    pts.push(...g);
   }
-  const n=lat.length,comp=new Int32Array(n).fill(-1),sizes=[],pn=new Uint8Array(n);
-  for(let i=0;i<n;i++)pn[i]=adj[i].some(e=>!e.road)?1:0;
-  for(let s=0;s<n;s++){if(comp[s]>=0)continue;const c=sizes.length;let cnt=0;const st=[s];comp[s]=c;while(st.length){const x=st.pop();cnt++;for(const e of adj[x])if(comp[e.to]<0){comp[e.to]=c;st.push(e.to)}}sizes.push(cnt)}
-  return{lat,lon,adj,n,comp,sizes,pn,okc:null,gs:new Float64Array(n),stamp:new Int32Array(n),cl:new Int32Array(n),prev:new Int32Array(n),run:0};
+  return pts;
 }
-function astar(G,s,t,used){
-  const{adj,lat,lon,gs,stamp,cl,prev}=G,run=++G.run,tl=lat[t],tn=lon[t],hf=[],hn=[];
-  const push=(f,x)=>{let i=hf.length;hf.push(f);hn.push(x);while(i>0){const p=(i-1)>>1;if(hf[p]<=f)break;hf[i]=hf[p];hn[i]=hn[p];i=p}hf[i]=f;hn[i]=x};
-  const pop=()=>{const x=hn[0],lf=hf.pop(),ln=hn.pop(),n=hf.length;if(n){let i=0;for(;;){let c=2*i+1;if(c>=n)break;if(c+1<n&&hf[c+1]<hf[c])c++;if(hf[c]>=lf)break;hf[i]=hf[c];hn[i]=hn[c];i=c}hf[i]=lf;hn[i]=ln}return x};
-  stamp[s]=run;gs[s]=0;prev[s]=-1;push(dm(lat[s],lon[s],tl,tn),s);
-  while(hf.length){
-    const x=pop();if(cl[x]===run)continue;cl[x]=run;
-    if(x===t){const p=[];for(let y=t;y!==-1;y=prev[y])p.push(y);return p.reverse()}
-    for(const e of adj[x]){
-      const y=e.to;if(cl[y]===run)continue;
-      const c=gs[x]+e.cost*(used&&used.has(e.id)?25:1);
-      if(stamp[y]!==run||c<gs[y]){stamp[y]=run;gs[y]=c;prev[y]=x;push(c+dm(lat[y],lon[y],tl,tn),y)}
-    }
-  }
-  return null;
-}
-function nearest(G,la,lo,maxM,pathOnly){
-  const k=Math.cos(la*D2R);let best=-1,bd=1e18;
-  for(let i=0;i<G.n;i++){if(!G.okc[G.comp[i]]||(pathOnly&&!G.pn[i]))continue;const dy=(G.lat[i]-la)*111195,dx=(G.lon[i]-lo)*111195*k,d=dx*dx+dy*dy;if(d<bd){bd=d;best=i}}
-  return best>=0&&Math.sqrt(bd)<=maxM?best:-1;
-}
-function makeLoop(G,s,r,bearing){
-  const la0=G.lat[s],lo0=G.lon[s],k=Math.cos(la0*D2R),b=bearing*D2R,cx=r*Math.sin(b),cy=r*Math.cos(b),seq=[s];
-  for(const off of [90,180,270]){
-    const th=b+Math.PI+off*D2R,wla=la0+(cy+r*Math.cos(th))/111195,wlo=lo0+(cx+r*Math.sin(th))/(111195*k);
-    let w=nearest(G,wla,wlo,r*.6,true);if(w<0)w=nearest(G,wla,wlo,r*.6,false);
-    if(w<0||seq.includes(w))return null;seq.push(w);
-  }
-  seq.push(s);
-  const used=new Set();let nodes=[s];
-  for(let i=1;i<seq.length;i++){
-    const p=astar(G,seq[i-1],seq[i],used);if(!p)return null;
-    for(let j=1;j<p.length;j++)used.add(G.adj[p[j-1]].find(q=>q.to===p[j]).id);
-    nodes=nodes.concat(p.slice(1));
-  }
-  let len=0,rep=0,road=0;const seen=new Set();
-  for(let j=1;j<nodes.length;j++){const e=G.adj[nodes[j-1]].find(q=>q.to===nodes[j]);len+=e.len;if(e.road)road+=e.len;if(seen.has(e.id))rep+=e.len;else seen.add(e.id)}
-  return len>0?{nodes,len,rep:rep/len,road:road/len,ids:seen}:null;
-}
-async function planLoops(G,s,Dm,short,onStep){
-  const found=[],bears=[0,30,60,90,120,150,180,210,240,270,300,330];
-  for(let bi=0;bi<bears.length;bi++){
-    if(onStep){onStep(bi+1,bears.length);await tick()}
-    let r=Dm/(2*Math.PI)/1.3,best=null;
-    for(let it=0;it<4;it++){
-      const R=makeLoop(G,s,r,bears[bi]);if(!R)break;
-      if(!best||Math.abs(R.len-Dm)<Math.abs(best.len-Dm))best=R;
-      const q=R.len/Dm;if(Math.abs(q-1)<=.08)break;
-      r=Math.min(Dm/4,Math.max(Dm/(2*Math.PI)/3,r/Math.pow(q,.9)));
-    }
-    if(best&&Math.abs(best.len/Dm-1)<=.2)found.push(best);
-  }
-  found.forEach(f=>f.score=Math.abs(f.len/Dm-1)*2+f.rep*4+f.road*(short?.3:3));
-  found.sort((a,b)=>a.score-b.score);
-  const okRoad=f=>short||f.road<=.35;
-  let pool=found.filter(f=>f.rep<=.2&&okRoad(f));
-  if(!pool.length)pool=found.filter(f=>f.rep<=.35);
-  if(!pool.length)pool=found.slice();
-  const pick=[];
-  for(const f of pool){
-    const dup=pick.some(p=>{let sh=0;for(const id of f.ids)if(p.ids.has(id))sh++;return sh/Math.min(f.ids.size,p.ids.size)>.6});
-    if(!dup)pick.push(f);if(pick.length===5)break;
-  }
-  if(!pick.length&&found.length)pick.push(found[0]);
-  return pick;
-}
-const HW=['path','footway','bridleway','track','cycleway','pedestrian','steps','living_street','residential','unclassified','service','tertiary'];
-const tcache=new Map();
-async function fetchTile(ix,iy){
-  const key='ov2:'+ix+','+iy;
-  if(tcache.has(key))return tcache.get(key);
-  const c=await tget(key);
-  if(c&&c.els&&Date.now()-c.t<30*864e5){tcache.set(key,c.els);return c.els}
-  const s=ix*.02,w=iy*.03,q='[out:json][timeout:25][bbox:'+s.toFixed(5)+','+w.toFixed(5)+','+(s+.02).toFixed(5)+','+(w+.03).toFixed(5)+'];('+HW.map(h=>'way[highway='+h+'];').join('')+');out tags geom;';
-  const off=Math.floor(Math.random()*OPS.length);
-  for(let a=0;a<4;a++){
-    const u=OPS[(off+a)%OPS.length],nm=new URL(u).host.replace('overpass','op').replace('.systems',''),ctl=new AbortController(),t=setTimeout(()=>ctl.abort(),22000);
-    try{
-      const r=await fetch(u,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'data='+encodeURIComponent(q),signal:ctl.signal});
+// Ask the Overpass mirrors, staggered; the first good answer wins and the rest are cancelled.
+async function racePublic(q,ms){
+  const ctls=OPS.map(()=>new AbortController());let won=false;
+  const timer=setTimeout(()=>ctls.forEach(c=>c.abort()),ms);
+  try{
+    return await Promise.any(OPS.map(async(u,i)=>{
+      if(i)await new Promise(r=>setTimeout(r,i*1500));
+      if(won)throw new Error('skipped');
+      const r=await fetch(u,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'data='+encodeURIComponent(q),signal:ctls[i].signal});
       if(!r.ok)throw new Error('HTTP '+r.status);
       const j=await r.json();
-      if(j.remark&&/error|timed out|memory/i.test(j.remark))throw new Error('busy');
-      const els=j.elements||[];tcache.set(key,els);tput(key,{t:Date.now(),els});return els;
-    }catch(e){dbg.push(nm+': '+(e.name==='AbortError'?'timeout':(e.message||e)))}
-    finally{clearTimeout(t)}
-    await new Promise(r=>setTimeout(r,700*(a+1)));
-  }
-  return null;
+      if(j.remark&&!(j.elements&&j.elements.length)&&/error|timed out|memory/i.test(j.remark))throw new Error('busy');
+      won=true;ctls.forEach((c,k)=>{if(k!==i)c.abort()});
+      return j;
+    }));
+  }finally{clearTimeout(timer)}
 }
-function sugPick(i){sugLines.forEach((l,j)=>{l.setStyle({weight:j===i?7:3,opacity:j===i?1:.35});if(j===i)l.bringToFront()});map.fitBounds(sugLines[i].getBounds(),{padding:[40,40]})}
-
-async function loadSharedRoutes(c,from,box){
-  const note=document.createElement('p');note.className='m';note.textContent='Checking routes shared by other people…';box.append(note);
-  try{
-    // The shared table stores the route name, GPX and measured distance.
-    // Deliberately do not filter by distance: location is the important match.
-    const u=SB_URL+'/rest/v1/cos_routes?select=name,gpx,distance_m&limit=200';
-    const r=await fetch(u,{headers:{apikey:SB_KEY,Authorization:'Bearer '+SB_KEY}});
-    if(!r.ok)throw new Error('Shared routes unavailable');
-    const rows=await r.json(),near=[];
-    for(const row of rows||[]){
-      if(!row.gpx)continue;
-      const parsed=parseGpx(row.gpx),pts=parsed.pts;
-      if(pts.length<2)continue;
-      const start=pts[0],away=dm(c.lat,c.lng,start[0],start[1]);
-      // Treat routes starting within 10 miles of the requested area as local.
-      if(away<=16093.44)near.push({name:row.name||parsed.name||'Shared route',pts,away,distance:row.distance_m>0?row.distance_m:dist(pts)});
-    }
-    near.sort((a,b)=>a.away-b.away);
-    note.remove();
-    const heading=document.createElement('p');heading.className='m';
-    heading.style.cssText='font-weight:700;margin:10px 0 4px';
-    heading.textContent='Shared by other people ('+near.length+')';
-    box.append(heading);
-    if(!near.length){
-      const empty=document.createElement('p');empty.className='m';
-      empty.textContent='No shared routes currently start within 10 miles of '+from+'.';
-      box.append(empty);return 0;
-    }
-    near.forEach((r,i)=>{
-      const color=['#7048e8','#0b7285','#a61e4d','#5c940d','#d9480f'][i%5];
-      const ln=L.polyline(r.pts,{color,weight:4,opacity:.85,dashArray:'7 5'}).addTo(sharedLayer);
-      const d=document.createElement('div');d.className='it';
-      const title=document.createElement('b');title.textContent=r.name;
-      const meta=document.createElement('span');meta.className='m';
-      meta.textContent=mi(r.distance)+' · starts '+(r.away<1609.344?(r.away/1609.344).toFixed(1)+' mi':' '+(r.away/1609.344).toFixed(1)+' mi')+' from '+from;
-      const actions=document.createElement('div');
-      const buttons=['Preview','Follow','Save','Export GPX'];
-      buttons.forEach(label=>{const b=document.createElement('button');b.textContent=label;actions.append(b)});
-      const [pv,fo,sv,ex]=actions.querySelectorAll('button');
-      pv.onclick=()=>{sharedLayer.eachLayer(x=>x.setStyle({weight:x===ln?7:4,opacity:x===ln?1:.55}));map.fitBounds(ln.getBounds(),{padding:[40,40]})};
-      fo.onclick=()=>{show({pts:r.pts});tabTo('follow')};
-      sv.onclick=()=>{save(r.name,r.pts,'route');toast('Shared route saved')};
-      ex.onclick=()=>dl(r.name,r.pts);
-      d.append(title,meta,actions);box.append(d);
-    });
-    return near.length;
-  }catch(e){
-    note.textContent='Could not load shared routes just now. Automatically generated suggestions will still be shown.';
-    return -1;
+const PUBR=16093;
+async function publicRoutes(c){
+  const key='pub1:'+Math.round(c.lat*50)+','+Math.round(c.lng*50),hit=await tget(key);
+  if(hit&&hit.routes&&Date.now()-hit.t<7*864e5)return hit.routes;
+  const q='[out:json][timeout:20];relation(around:'+PUBR+','+c.lat.toFixed(5)+','+c.lng.toFixed(5)+')[route~"^(hiking|foot|walking)$"][network!~"^(iwn|nwn)$"];out geom;';
+  const j=await racePublic(q,22000),routes=[];
+  for(const rel of j.elements||[]){
+    if(rel.type!=='relation'||!rel.tags)continue;
+    const t=rel.tags,name=t.name||t.ref||t.description;if(!name)continue;
+    const pts=relPts(rel);if(pts.length<5)continue;
+    const distance=plen(pts);if(distance<500)continue;
+    routes.push({id:rel.id,name,pts:thin(pts,15),distance});
   }
+  tput(key,{t:Date.now(),routes});
+  return routes;
 }
-/* ---------- public walking routes from OpenStreetMap ---------- */
-async function loadPublicRoutes(c,from,box){
-  const note=document.createElement('p');note.className='m';note.textContent='Searching public OpenStreetMap walking routes…';box.append(note);
-  try{
-    const radius=16093,query='[out:json][timeout:25];relation(around:'+radius+','+c.lat+','+c.lng+')["route"~"^(hiking|foot|walking)$"];out body;>;out geom;';
-    let data=null,lastErr=null;
-    for(const u of OPS){
-      const ctl=new AbortController(),timer=setTimeout(()=>ctl.abort(),28000);
-      try{
-        const r=await fetch(u,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'data='+encodeURIComponent(query),signal:ctl.signal});
-        if(!r.ok)throw new Error('HTTP '+r.status);
-        const j=await r.json();if(j.remark&&/error|timed out|memory/i.test(j.remark))throw new Error(j.remark);
-        data=j;break;
-      }catch(e){lastErr=e}finally{clearTimeout(timer)}
-    }
-    if(!data)throw lastErr||new Error('Public route search unavailable');
-    const ways=new Map();
-    for(const el of data.elements||[])if(el.type==='way'&&Array.isArray(el.geometry)&&el.geometry.length>1)ways.set(el.id,el.geometry);
-    const results=[];
-    for(const rel of data.elements||[]){
-      if(rel.type!=='relation'||!rel.tags||!Array.isArray(rel.members))continue;
-      const pts=[];
-      for(const m of rel.members){
-        if(m.type!=='way'||!ways.has(m.ref))continue;
-        let g=ways.get(m.ref).map(x=>[+x.lat,+x.lon]);if(m.role==='backward')g.reverse();
-        if(!g.length)continue;
-        if(pts.length&&dm(pts[pts.length-1][0],pts[pts.length-1][1],g[0][0],g[0][1])<35)g.shift();
-        pts.push(...g);
-      }
-      if(pts.length<5)continue;
-      const away=dm(c.lat,c.lng,pts[0][0],pts[0][1]);
-      if(away>radius)continue;
-      const distance=dist(pts);if(distance<500)continue;
-      results.push({id:rel.id,name:rel.tags.name||rel.tags.ref||'Unnamed public walking route',pts,away,distance,url:'https://www.openstreetmap.org/relation/'+rel.id,type:rel.tags.route||'walking'});
-    }
-    results.sort((a,b)=>a.away-b.away);note.remove();
-    const heading=document.createElement('p');heading.className='m';heading.style.cssText='font-weight:700;margin:12px 0 4px';heading.textContent='Public walking routes ('+results.length+')';box.append(heading);
-    const attribution=document.createElement('p');attribution.className='m';attribution.textContent='From OpenStreetMap community mapping. Routes are not distance-filtered; the requested mileage is a guide. Check access, conditions and route details before setting off.';box.append(attribution);
-    const more=document.createElement('p');more.className='m';more.textContent='More public walks on other websites: ';
-    [['Wikiloc','wikiloc.com'],['Walking Englishman','walkingenglishman.com'],['Walkr','walkr.co.uk']].forEach((site,i)=>{if(i)more.append(' · ');const a=document.createElement('a');a.textContent=site[0];a.href='https://www.google.com/search?q='+encodeURIComponent('site:'+site[1]+' walking routes '+from);a.target='_blank';a.rel='noopener';a.style.color='var(--green)';more.append(a)});box.append(more);
-    if(!results.length){const empty=document.createElement('p');empty.className='m';empty.textContent='No mapped public walking routes found starting within 10 miles of '+from+'. Try a nearby town or village.';box.append(empty);return 0}
-    results.slice(0,30).forEach((r,i)=>{
-      const color=['#7048e8','#0b7285','#a61e4d','#5c940d','#d9480f'][i%5];
-      const ln=L.polyline(r.pts,{color,weight:4,opacity:.85,dashArray:'3 5'}).addTo(sharedLayer);
-      const d=document.createElement('div');d.className='it';
-      const title=document.createElement('b');title.textContent=r.name;
-      const meta=document.createElement('span');meta.className='m';meta.textContent=mi(r.distance)+' · starts '+(r.away/1609.344).toFixed(1)+' mi from '+from+' · OpenStreetMap';
-      const actions=document.createElement('div');
-      const buttons=['Preview','Follow','Save','Export GPX','Source'];buttons.forEach(label=>{const b=document.createElement('button');b.textContent=label;actions.append(b)});
-      const [pv,fo,sv,ex,src]=actions.querySelectorAll('button');
-      pv.onclick=()=>{sharedLayer.eachLayer(x=>x.setStyle({weight:x===ln?7:4,opacity:x===ln?1:.5}));map.fitBounds(ln.getBounds(),{padding:[40,40]})};
-      fo.onclick=()=>{show({pts:r.pts});tabTo('follow')};
-      sv.onclick=()=>{save(r.name,r.pts,'route');toast('Public route saved')};
-      ex.onclick=()=>dl(r.name,r.pts);
-      src.onclick=()=>window.open(r.url,'_blank','noopener');
-      d.append(title,meta,actions);box.append(d);
-    });
-    return results.length;
-  }catch(e){
-    note.textContent='Public OpenStreetMap routes could not be loaded just now. Generated suggestions and HDSG shared routes are still available.';
-    return -1;
-  }
-}
+function sugPick(i){sugLines.forEach((l,j)=>{l.setStyle({weight:j===i?7:4,opacity:j===i?1:.4});if(j===i)l.bringToFront()});map.fitBounds(sugLines[i].getBounds(),{padding:[40,40]})}
 async function suggest(){
   const btn=$('sgo'),st=$('sst'),box=$('sres');
   let D=parseFloat($('sm').value);if(!(D>0)){toast('Enter how many miles you want');return}
   D=Math.min(15,Math.max(.5,D));$('sm').value=D;
-  const Dm=D*1609.344,short=D<=2;
-  btn.disabled=true;sugLayer.clearLayers();sharedLayer.clearLayers();sugLines=[];box.innerHTML='';
+  const Dm=D*1609.344;
+  btn.disabled=true;sugLayer.clearLayers();sugLines=[];box.innerHTML='';
   try{
     const txt=$('sa').value.trim();let c;
     st.textContent='Finding the start…';
@@ -538,55 +362,41 @@ async function suggest(){
     }else c=await centre();
     if(!c){st.textContent='Allow location, or type a start area.';return}
     const from=txt||'the map centre';
-    const sharedCount=await loadSharedRoutes(c,from,box);
-    const publicCount=await loadPublicRoutes(c,from,box);
-    const sharedNote=sharedCount>0?' '+sharedCount+' HDSG-shared route'+(sharedCount===1?'':'s')+' shown.':(sharedCount===-1?' HDSG shared routes could not be checked.':'');
-    const publicNote=publicCount>0?' '+publicCount+' public OpenStreetMap route'+(publicCount===1?'':'s')+' shown.':(publicCount===-1?' Public routes could not be checked.':'');
-    const R=Math.min(7500,Math.round(.36*Dm+500));
-    const dy=R/111195,dx=R/(111195*Math.cos(c.lat*D2R)),need=[];
-    for(let ix=Math.floor((c.lat-dy)/.02);ix<=Math.floor((c.lat+dy)/.02);ix++)for(let iy=Math.floor((c.lng-dx)/.03);iy<=Math.floor((c.lng+dx)/.03);iy++){
-      const cy=Math.min(Math.max(c.lat,ix*.02),ix*.02+.02),cx=Math.min(Math.max(c.lng,iy*.03),iy*.03+.03);
-      if(dm(c.lat,c.lng,cy,cx)<=R)need.push([ix,iy]);
-    }
-    dbg=[];let done=0,failed=0,startOk=true;const startKey=Math.floor(c.lat/.02)+','+Math.floor(c.lng/.03),els=[];
-    st.textContent='Loading path data… 0 of '+need.length;
-    let qi=0;
-    await Promise.all([0,1,2].map(async()=>{
-      while(qi<need.length){
-        const[ix,iy]=need[qi++],r=await fetchTile(ix,iy);
-        if(r)for(const w of r)els.push(w);else{failed++;if(ix+','+iy===startKey)startOk=false}
-        done++;st.textContent='Loading path data… '+done+' of '+need.length;
-      }
-    }));
-    if(!startOk||failed>need.length*.3){st.textContent='The path data service is busy ('+failed+' of '+need.length+' map sections did not load). Tap Suggest routes again: sections already loaded are saved, so it only fetches what is missing.'+sharedNote+publicNote;return}
-    if(!els.length){st.textContent='No paths found near there. Try a different start.'+sharedNote+publicNote;return}
-    st.textContent='Building the path network…';await tick();
-    const G=buildGraph(els,short);
-    const big=G.sizes.reduce((a,b)=>Math.max(a,b),0);
-    G.okc=new Uint8Array(G.sizes.length);G.sizes.forEach((z,i)=>G.okc[i]=z>=big*.25?1:0);
-    const s=nearest(G,c.lat,c.lng,1500);
-    if(s<0){st.textContent='No usable paths within a mile of that start. Try a different start.'+sharedNote+publicNote;return}
-    const sd=dm(c.lat,c.lng,G.lat[s],G.lon[s]);
-    G.okc.fill(0);G.okc[G.comp[s]]=1;
-    const pick=await planLoops(G,s,Dm,short,(i,n)=>{st.textContent='Trying loops… direction '+i+' of '+n});
-    if(!pick.length){st.textContent='Could not build a loop that long from there using paths. Try fewer miles or a different start.'+sharedNote+publicNote;return}
-    L.circleMarker([G.lat[s],G.lon[s]],{radius:8,color:'#fff',weight:3,fillColor:'#2b8a3e',fillOpacity:1}).addTo(sugLayer);
+    st.textContent='Searching published walking routes…';
+    let routes;
+    try{routes=await publicRoutes(c)}
+    catch(e){st.textContent='The route service is busy. Tap Suggest routes again in a minute.';return}
     const all=[];
-    pick.forEach((f,i)=>{
-      const pts=f.nodes.map(x=>[G.lat[x],G.lon[x]]),name='Loop '+D+' mi from '+from+' ('+'ABCDE'[i]+')';
-      const ln=L.polyline(pts,{color:SUGCOL[i],weight:4,opacity:.9}).addTo(sugLayer);sugLines.push(ln);all.push(ln);
+    for(const r of routes){
+      let away=1e12;for(const p of r.pts){const d=dm(c.lat,c.lng,p[0],p[1]);if(d<away)away=d}
+      if(away<=PUBR)all.push({...r,away,ratio:r.distance/Dm});
+    }
+    all.forEach(r=>r.score=Math.abs(r.ratio-1)+r.away/40000);
+    all.sort((a,b)=>a.score-b.score);
+    let list=all.filter(r=>r.ratio>=.65&&r.ratio<=1.35).slice(0,15),near=true;
+    if(list.length<3){list=all.slice(0,10);near=false}
+    const more=document.createElement('p');more.className='m';more.textContent='More published walks on other sites: ';
+    [['Wikiloc','wikiloc.com'],['Walking Englishman','walkingenglishman.com'],['Walkr','walkr.co.uk']].forEach((site,i)=>{if(i)more.append(' · ');const a=document.createElement('a');a.textContent=site[0];a.href='https://www.google.com/search?q='+encodeURIComponent('site:'+site[1]+' walking routes '+from);a.target='_blank';a.rel='noopener';a.style.color='var(--green)';more.append(a)});
+    if(!list.length){st.textContent='No published walking routes found within 10 miles of '+from+'. Try a nearby town or village.';box.append(more);return}
+    L.circleMarker([c.lat,c.lng],{radius:8,color:'#fff',weight:3,fillColor:'#2b8a3e',fillOpacity:1}).addTo(sugLayer);
+    list.forEach((r,i)=>{
+      const color=SUGCOL[i%5],ln=L.polyline(r.pts,{color,weight:4,opacity:.9}).addTo(sugLayer);sugLines.push(ln);
       const d=document.createElement('div');d.className='it';
-      d.innerHTML='<b><span class="sw" style="background:'+SUGCOL[i]+'"></span>Route '+'ABCDE'[i]+'</b><span class="m"></span><div><button>Preview</button><button>Follow</button><button>Save</button><button>Export GPX</button></div>';
-      d.querySelector('span.m').textContent=mi(f.len)+' · '+Math.round((1-f.road)*100)+'% on paths'+(f.rep>.15?' · '+Math.round(f.rep*100)+'% retraced':'');
-      const[pv,fo,sv,ex]=d.querySelectorAll('button');
+      const title=document.createElement('b');const sw=document.createElement('span');sw.className='sw';sw.style.background=color;title.append(sw,r.name);
+      const meta=document.createElement('span');meta.className='m';meta.textContent=mi(r.distance)+' · passes '+(r.away/1609.344).toFixed(1)+' mi from '+from+' · OpenStreetMap';
+      const actions=document.createElement('div');
+      ['Preview','Follow','Save','Export GPX','Source'].forEach(l=>{const b=document.createElement('button');b.textContent=l;actions.append(b)});
+      const[pv,fo,sv,ex,src]=actions.querySelectorAll('button');
       pv.onclick=()=>sugPick(i);
-      fo.onclick=()=>{show({pts});tabTo('follow')};
-      sv.onclick=()=>{save(name,pts,'route');toast('Saved')};
-      ex.onclick=()=>dl(name,pts);
-      box.append(d);
+      fo.onclick=()=>{show({pts:r.pts});tabTo('follow')};
+      sv.onclick=()=>{save(r.name,r.pts,'route');toast('Saved')};
+      ex.onclick=()=>dl(r.name,r.pts);
+      src.onclick=()=>window.open('https://www.openstreetmap.org/relation/'+r.id,'_blank','noopener');
+      d.append(title,meta,actions);box.append(d);
     });
-    map.fitBounds(L.featureGroup(all).getBounds(),{padding:[40,40]});
-    st.textContent=pick.length+(pick.length===1?' loop':' loops')+' from '+from+', about '+D+' mi.'+(sd>150?' Nearest path to your start is '+Math.round(sd*3.28084)+' ft away, so routes start there.':'')+sharedNote+publicNote+' Check the ground conditions before you set off.';
+    box.append(more);
+    map.fitBounds(L.featureGroup(sugLines).getBounds(),{padding:[40,40]});
+    st.textContent=list.length+(list.length===1?' route':' routes')+' near '+from+(near?', closest to '+D+' mi.':'. Few are close to '+D+' mi, so these are the nearest lengths.')+' From OpenStreetMap community mapping. Check access and conditions before you set off.';
   }finally{btn.disabled=false}
 }
 $('sgo').onclick=suggest;
