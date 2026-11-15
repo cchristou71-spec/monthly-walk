@@ -97,6 +97,7 @@ body.fs #fsbar{display:flex}
     <button class="tab" data-t="follow">Follow</button>
     <button class="tab" data-t="record">Record</button>
     <button class="tab" data-t="saved">Saved</button>
+    <button class="tab" data-t="links" style="flex:1 1 100%">Links &amp; upload</button>
     <label class="chk"><input type="checkbox" id="ac" checked> Centre on me</label>
   </div>
 
@@ -116,12 +117,15 @@ body.fs #fsbar{display:flex}
     <div class="row"><input id="sa" type="search" placeholder="Start: town, village or postcode (blank = map centre)" aria-label="Start area" enterkeyhint="go"></div>
     <div class="row"><input id="sm" type="number" inputmode="decimal" min="0.5" max="15" step="0.5" value="5" aria-label="Miles"><span>miles, approx.</span><button id="sgo" class="go">Suggest routes</button></div>
     <p class="m" id="sst">Finds walking routes already published by others (OpenStreetMap community routes) near your start, closest to the miles you enter.</p>
-    <p class="m" style="font-weight:700;margin:12px 0 4px">Add your own route</p>
+    <div id="sres"></div>
+  </div>
+
+  <div class="pane" id="p-links" hidden>
+    <p class="m">Add a route from a link (a GPX file, or a Komoot / AllTrails page, best effort) or upload a GPX file from your phone.</p>
     <div class="row"><input id="lk" type="url" placeholder="Paste a link (GPX file, Komoot, AllTrails…)" aria-label="Route link" enterkeyhint="go"><button id="lkgo">Load link</button></div>
     <div class="row"><button id="upl" type="button">Upload GPX file</button><input id="upf" type="file" accept=".gpx,.xml,application/gpx+xml,application/xml,text/xml,application/octet-stream" hidden></div>
     <p class="m" id="lkst"></p>
     <div id="lkres"></div>
-    <div id="sres"></div>
   </div>
 
   <div class="pane" id="p-follow" hidden>
