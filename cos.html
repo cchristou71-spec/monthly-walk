@@ -394,7 +394,7 @@ async function suggest(){
     for(let a=0;a<3&&!els;a++){
       try{els=await overpass(mk(a===0?R:R*(a===1?.8:.6)),28000)}catch(e){if(a<2){st.textContent='Path data service is slow, trying again with a smaller area…';await new Promise(r=>setTimeout(r,2000))}}
     }
-    if(!els){st.textContent='The path data service is busy. Try again in a minute. ('+dbg.slice(-6).join(' · ')+')';return}
+    if(!els){st.textContent='The path data service is busy. Try again in a minute. (suggest v3 · '+dbg.slice(-9).join(' · ')+')';return}
     if(!els.length){st.textContent='No paths found near there. Try a different start.';return}
     st.textContent='Building the path network…';await tick();
     const G=buildGraph(els,short);
