@@ -114,7 +114,7 @@ body.fs #fsbar{display:flex}
     </div>
     <div class="row">
       <span class="big" id="pd">0.00 mi</span>
-      <button id="undo">Undo</button><button id="clr">Clear</button><button id="sv">Save</button><button id="ex">Export GPX</button><button id="sh">Share to HDSG</button>
+      <button id="undo">Undo</button><button id="clr">Clear</button><button id="sv">Save in app</button><button id="ex">Save to phone</button><button id="sh">Share to HDSG</button>
     </div>
     <div class="m" id="pg" style="margin:-2px 0 6px"></div>
     <div class="row"><button id="dl">Save this map area offline</button><span class="m" id="dls"></span></div>
@@ -339,20 +339,21 @@ function dl(name,pts){
   const a=document.createElement('a');
   a.href=URL.createObjectURL(new Blob([gpx(name,pts)],{type:'application/gpx+xml'}));
   a.download=(name.replace(/[^\w\- ]+/g,'').trim().replace(/\s+/g,'_')||'route')+'.gpx';
-  document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),5000);
+  document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),5000);toast('GPX file saved to your phone (Downloads)');
 }
 const store=()=>{try{return JSON.parse(localStorage.getItem('routes')||'[]')}catch(e){return[]}};
-const put=a=>{try{localStorage.setItem('routes',JSON.stringify(a))}catch(e){toast('Storage is full. Export GPX files and delete old items.')}};
+const put=a=>{try{localStorage.setItem('routes',JSON.stringify(a))}catch(e){toast('Storage is full. Save routes to your phone as GPX files and delete old items.')}};
 function save(name,pts,type){const a=store();a.unshift({id:Date.now()+Math.random(),name,pts,type,date:new Date().toISOString(),dist:dist(pts)});put(a);list()}
 function show(r){sugLayer.clearLayers();clearPlan();loaded=r.pts;loadedName=r.name||'';redraw();map.fitBounds(line.getBounds(),{padding:[40,40]})}
 function list(){
   const a=store(),box=$('list');box.innerHTML=a.length?'':'<p class="m">Nothing saved yet. Save a plotted route or finish a recording.</p>';
   a.forEach(r=>{
     const d=document.createElement('div');d.className='it';
-    d.innerHTML='<b></b><span class="m"></span><div><button>Show</button><button>Follow</button><button>Export GPX</button><button>Share to HDSG</button><button>Delete</button></div>';
+    d.innerHTML='<b></b><span class="m"></span><div><button>Show</button><button>Follow</button><button>Rename</button><button>Save to phone</button><button>Share to HDSG</button><button>Delete</button></div>';
     d.querySelector('b').textContent=r.name;
     const mt=d.querySelector('span');mt.textContent=(r.type==='track'?'Recorded':'Planned')+', '+mi(r.dist)+', '+new Date(r.date).toLocaleDateString('en-GB');addGain(mt,r.pts);
-    const [s,f,g,sb2,x]=d.querySelectorAll('button');
+    const [s,f,rn,g,sb2,x]=d.querySelectorAll('button');
+    rn.onclick=()=>{const n=(prompt('Rename route',r.name)||'').trim();if(!n)return;const a=store(),q=a.find(z=>z.id===r.id);if(q){q.name=n;put(a);if(loadedName===r.name){loadedName=n;updateChip()}list()}};
     s.onclick=()=>{show(r);tabTo('plot')};
     f.onclick=()=>{show(r);tabTo('follow')};
     g.onclick=()=>dl(r.name,r.pts);
@@ -486,7 +487,7 @@ function renderSug(s,draw,prefix){
     const title=document.createElement('b');const sw=document.createElement('span');sw.className='sw';sw.style.background=color;title.append(sw,r.name);
     const meta=document.createElement('span');meta.className='m';meta.textContent=mi(r.distance)+' · passes '+(r.away/1609.344).toFixed(1)+' mi from '+from+' · OpenStreetMap';addGain(meta,r.pts);
     const actions=document.createElement('div');
-    ['Preview','Follow','Save','Export GPX','Source'].forEach(l=>{const b=document.createElement('button');b.textContent=l;actions.append(b)});
+    ['Preview','Follow','Save in app','Save to phone','Source'].forEach(l=>{const b=document.createElement('button');b.textContent=l;actions.append(b)});
     const[pv,fo,sv,ex,src]=actions.querySelectorAll('button');
     pv.onclick=()=>{if(!sugLayer.hasLayer(ln)){sugNeedsDraw=false;sugDraw()}sugPick(i)};
     fo.onclick=()=>{show({pts:r.pts,name:r.name});tabTo('follow')};
@@ -572,7 +573,7 @@ function addExtra(name,pts,src){
   const title=document.createElement('b');title.textContent=name;
   const meta=document.createElement('span');meta.className='m';meta.textContent=mi(plen(ll))+' · '+src;addGain(meta,pts);
   const actions=document.createElement('div');
-  ['Show on map','Follow','Save','Export GPX','Remove'].forEach(l=>{const b=document.createElement('button');b.textContent=l;actions.append(b)});
+  ['Show on map','Follow','Save in app','Save to phone','Remove'].forEach(l=>{const b=document.createElement('button');b.textContent=l;actions.append(b)});
   const[pv,fo,sv,ex,rm]=actions.querySelectorAll('button');
   const open=()=>show({pts,name});
   pv.onclick=open;
