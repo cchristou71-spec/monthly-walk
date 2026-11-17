@@ -43,6 +43,10 @@ button.on{background:var(--ink);color:#fff;border-color:var(--ink)}
 button.go{background:var(--route);border-color:var(--route);color:#fff;font-weight:700}
 #fpill{display:none;position:absolute;z-index:1000;left:10px;bottom:12px;align-items:center;gap:10px;background:#fffffff2;border:1px solid var(--line);border-radius:999px;padding:5px 6px 5px 14px;font-weight:700;box-shadow:0 1px 4px #0003}
 body.following:not(.fs) #fpill{display:flex}
+.rchip{display:none;position:absolute;z-index:1000;left:10px;bottom:34px;max-width:calc(100% - 90px);background:#fffffff2;border:1px solid var(--line);border-radius:10px;padding:6px 10px;box-shadow:0 1px 4px #0003;font-size:13px}
+.rchip.on{display:block}
+.rchip b{display:block;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+body.following .rchip{bottom:62px}
 button.stop{background:var(--rec);border-color:var(--rec);color:#fff;font-weight:700}
 button:disabled{opacity:.5}
 button:focus-visible,input:focus-visible,.tab:focus-visible{outline:3px solid #1c7ed6;outline-offset:2px}
@@ -50,6 +54,8 @@ button:focus-visible,input:focus-visible,.tab:focus-visible{outline:3px solid #1
 .m{color:var(--muted);font-size:13px;margin:0}
 .pane[hidden]{display:none}
 .stat{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin:8px 0}
+#fs{grid-template-columns:repeat(4,1fr)}
+#fs b{font-size:17px}
 .stat div{background:#fff;border:1px solid var(--line);border-radius:8px;padding:6px 8px}
 .stat b{display:block;font-size:19px}
 .stat span{font-size:12px;color:var(--muted)}
@@ -88,6 +94,7 @@ body.fs #fsbar{display:flex}
   <div id="fsbar"><div class="st"><div><b>–</b><span>Done</span></div><div><b>–</b><span>Left</span></div><div id="fso"><b>–</b><span>Off route</span></div></div><button id="fss" class="stop" aria-label="Stop following">Stop</button><button id="fsx" aria-label="Exit full screen">&#10005;</button></div>
   <button id="loc" aria-label="Show my location">&#9678;</button>
   <div id="warn" role="alert" hidden></div>
+  <div id="rchip" class="rchip"><b></b><span></span></div>
   <div id="fpill"><span>&#9679; Following</span><button id="fpx" class="stop">Stop</button></div>
 </div>
 <div id="panel">
@@ -109,6 +116,7 @@ body.fs #fsbar{display:flex}
       <span class="big" id="pd">0.00 mi</span>
       <button id="undo">Undo</button><button id="clr">Clear</button><button id="sv">Save</button><button id="ex">Export GPX</button><button id="sh">Share to HDSG</button>
     </div>
+    <div class="m" id="pg" style="margin:-2px 0 6px"></div>
     <div class="row"><button id="dl">Save this map area offline</button><span class="m" id="dls"></span></div>
     <p class="m">Tap the map to add points and drag a point to adjust it. Walk, Cycle and Drive snap points and legs to nearby paths or roads.</p>
   </div>
@@ -131,7 +139,7 @@ body.fs #fsbar{display:flex}
   <div class="pane" id="p-follow" hidden>
     <div class="row"><a id="back" href="./" hidden style="font-weight:600;color:var(--green);padding:6px 0">&larr; Back to HDSG Walks</a></div>
     <div class="row"><button id="fb" class="go">Start following</button><button id="fsb">Full screen map</button><button id="fclr">Clear route</button><span class="m" id="fm">Uses the route on the map. Keep the screen on so warnings can sound.</span></div>
-    <div class="stat" id="fs"><div><b>–</b><span>Done</span></div><div><b>–</b><span>Left</span></div><div id="fo"><b>–</b><span>Off route</span></div></div>
+    <div class="stat" id="fs"><div><b>–</b><span>Done</span></div><div><b>–</b><span>Left</span></div><div id="fo"><b>–</b><span>Off route</span></div><div id="fcl"><b>–</b><span>Total climb</span></div></div>
   </div>
 
   <div class="pane" id="p-record" hidden>
@@ -197,7 +205,83 @@ const line=L.polyline([],{color:'#d9480f',weight:5,opacity:.9}).addTo(map);
 const LL=p=>L.latLng(p[0],p[1]);
 const path=()=>loaded?loaded.map(p=>[p[0],p[1]]):wps.flatMap(w=>w.seg);
 const dist=p=>p.reduce((s,q,i)=>i?s+LL(p[i-1]).distanceTo(LL(q)):0,0);
-const redraw=()=>{const p=path();line.setLatLngs(p);$('pd').textContent=mi(dist(p))};
+/* ---------- elevation gain (feet) ---------- */
+const fmtFt=ft=>Math.round(ft).toLocaleString('en-GB')+' ft';
+const dmE=(a,b)=>Math.hypot((b[0]-a[0])*111195,(b[1]-a[1])*111195*Math.cos((a[0]+b[0])*Math.PI/360));
+function resampleE(pts,step){
+  const o=[pts[0]];let acc=0;
+  for(let i=1;i<pts.length;i++){acc+=dmE(pts[i-1],pts[i]);if(acc>=step){o.push(pts[i]);acc=0}}
+  if(o[o.length-1]!==pts[pts.length-1])o.push(pts[pts.length-1]);
+  return o;
+}
+// Smooth the heights, then only count a climb once it is 3 m above the lowest point so far (ignores GPS and map noise).
+function gainM(e){
+  const s=e.map((_,i)=>{let a=0,n=0;for(let k=Math.max(0,i-2);k<=Math.min(e.length-1,i+2);k++){a+=e[k];n++}return a/n});
+  let g=0,base=s[0];
+  for(let i=1;i<s.length;i++){if(s[i]<base)base=s[i];else if(s[i]-base>=3){g+=s[i]-base;base=s[i]}}
+  return g;
+}
+async function fetchEle(samples){
+  const out=[];
+  for(let i=0;i<samples.length;i+=100){
+    const ch=samples.slice(i,i+100);let got=null;
+    const tries=[
+      'https://api.open-meteo.com/v1/elevation?latitude='+ch.map(p=>p[0].toFixed(5)).join(',')+'&longitude='+ch.map(p=>p[1].toFixed(5)).join(','),
+      'https://api.opentopodata.org/v1/eudem25m?locations='+ch.map(p=>p[0].toFixed(5)+','+p[1].toFixed(5)).join('|')
+    ];
+    for(let k=0;k<tries.length&&!got;k++){
+      const c=new AbortController(),t=setTimeout(()=>c.abort(),12000);
+      try{
+        const r=await fetch(tries[k],{signal:c.signal});if(!r.ok)throw new Error('HTTP '+r.status);
+        const j=await r.json();
+        const v=k===0?j.elevation:(j.results||[]).map(x=>x.elevation);
+        if(v&&v.length===ch.length&&v.every(x=>typeof x==='number'))got=v;
+      }catch(e){}finally{clearTimeout(t)}
+    }
+    if(!got)throw new Error('no elevation data');
+    out.push(...got);
+  }
+  return out;
+}
+async function elevCalc(pts){
+  if(!pts||pts.length<2)return null;
+  let len=0;for(let i=1;i<pts.length;i++)len+=dmE(pts[i-1],pts[i]);
+  const a=pts[0],z=pts[pts.length-1];
+  const key='elev1:'+[Math.round(a[0]*1e4),Math.round(a[1]*1e4),Math.round(z[0]*1e4),Math.round(z[1]*1e4),pts.length,Math.round(len)].join(',');
+  const hit=await tget(key);if(hit&&typeof hit.ft==='number')return hit.ft;
+  let es;
+  const withEle=pts.filter(p=>p[2]!=null&&isFinite(p[2])).length>=pts.length*.8;
+  if(withEle){
+    let last=null;es=resampleE(pts,40).map(p=>{if(p[2]!=null&&isFinite(p[2]))last=+p[2];return last}).filter(v=>v!=null);
+  }else es=await fetchEle(resampleE(pts,Math.max(80,len/250)));
+  if(es.length<2)return null;
+  const ft=gainM(es)*3.28084;
+  tput(key,{ft});
+  return ft;
+}
+let elevQ=Promise.resolve();
+function elevGainFt(pts){const p=elevQ.then(()=>elevCalc(pts),()=>elevCalc(pts));elevQ=p.catch(()=>{});return p.catch(()=>null)}
+function addGain(el,pts){elevGainFt(pts).then(ft=>{if(ft!=null)el.textContent+=' · ↑ '+fmtFt(ft)})}
+let gainTok=0,gainTimer=null,loadedName='',chipGain='';
+function updateChip(){
+  const c=$('rchip');
+  if(!loaded||!loaded.length){c.classList.remove('on');return}
+  c.querySelector('b').textContent=loadedName||'Route';
+  c.querySelector('span').textContent=$('pd').textContent+(chipGain?' · '+chipGain:'');
+  c.classList.add('on');
+}
+function showGain(pts){
+  const tok=++gainTok,el=$('pg'),cl=$('fcl');clearTimeout(gainTimer);
+  const set=(t,v,chip)=>{el.textContent=t;if(cl)cl.querySelector('b').textContent=v;chipGain=chip||'';updateChip()};
+  if(!pts||pts.length<2){set('','–','');return}
+  set('Working out climb…','…','working out climb…');
+  gainTimer=setTimeout(async()=>{
+    const ft=await elevGainFt(pts);if(tok!==gainTok)return;
+    if(ft==null)set('Climb unavailable (needs internet)','–','');else set('↑ '+fmtFt(ft)+' total climb',fmtFt(ft),'↑ '+fmtFt(ft));
+  },900);
+}
+
+const redraw=()=>{const p=path();line.setLatLngs(p);$('pd').textContent=mi(dist(p));showGain(loaded||p)};
 
 async function seg(w){
   const i=wps.indexOf(w);
@@ -260,14 +344,14 @@ function dl(name,pts){
 const store=()=>{try{return JSON.parse(localStorage.getItem('routes')||'[]')}catch(e){return[]}};
 const put=a=>{try{localStorage.setItem('routes',JSON.stringify(a))}catch(e){toast('Storage is full. Export GPX files and delete old items.')}};
 function save(name,pts,type){const a=store();a.unshift({id:Date.now()+Math.random(),name,pts,type,date:new Date().toISOString(),dist:dist(pts)});put(a);list()}
-function show(r){sugLayer.clearLayers();clearPlan();loaded=r.pts;redraw();map.fitBounds(line.getBounds(),{padding:[40,40]})}
+function show(r){sugLayer.clearLayers();clearPlan();loaded=r.pts;loadedName=r.name||'';redraw();map.fitBounds(line.getBounds(),{padding:[40,40]})}
 function list(){
   const a=store(),box=$('list');box.innerHTML=a.length?'':'<p class="m">Nothing saved yet. Save a plotted route or finish a recording.</p>';
   a.forEach(r=>{
     const d=document.createElement('div');d.className='it';
     d.innerHTML='<b></b><span class="m"></span><div><button>Show</button><button>Follow</button><button>Export GPX</button><button>Share to HDSG</button><button>Delete</button></div>';
     d.querySelector('b').textContent=r.name;
-    d.querySelector('span').textContent=(r.type==='track'?'Recorded':'Planned')+', '+mi(r.dist)+', '+new Date(r.date).toLocaleDateString('en-GB');
+    const mt=d.querySelector('span');mt.textContent=(r.type==='track'?'Recorded':'Planned')+', '+mi(r.dist)+', '+new Date(r.date).toLocaleDateString('en-GB');addGain(mt,r.pts);
     const [s,f,g,sb2,x]=d.querySelectorAll('button');
     s.onclick=()=>{show(r);tabTo('plot')};
     f.onclick=()=>{show(r);tabTo('follow')};
@@ -400,12 +484,12 @@ function renderSug(s,draw,prefix){
     const color=SUGCOL[i%5],ln=L.polyline(r.pts,{color,weight:4,opacity:.9});sugLines.push(ln);
     const d=document.createElement('div');d.className='it';
     const title=document.createElement('b');const sw=document.createElement('span');sw.className='sw';sw.style.background=color;title.append(sw,r.name);
-    const meta=document.createElement('span');meta.className='m';meta.textContent=mi(r.distance)+' · passes '+(r.away/1609.344).toFixed(1)+' mi from '+from+' · OpenStreetMap';
+    const meta=document.createElement('span');meta.className='m';meta.textContent=mi(r.distance)+' · passes '+(r.away/1609.344).toFixed(1)+' mi from '+from+' · OpenStreetMap';addGain(meta,r.pts);
     const actions=document.createElement('div');
     ['Preview','Follow','Save','Export GPX','Source'].forEach(l=>{const b=document.createElement('button');b.textContent=l;actions.append(b)});
     const[pv,fo,sv,ex,src]=actions.querySelectorAll('button');
     pv.onclick=()=>{if(!sugLayer.hasLayer(ln)){sugNeedsDraw=false;sugDraw()}sugPick(i)};
-    fo.onclick=()=>{show({pts:r.pts});tabTo('follow')};
+    fo.onclick=()=>{show({pts:r.pts,name:r.name});tabTo('follow')};
     sv.onclick=()=>{save(r.name,r.pts,'route');toast('Saved')};
     ex.onclick=()=>dl(r.name,r.pts);
     src.onclick=()=>window.open('https://www.openstreetmap.org/relation/'+r.id,'_blank','noopener');
@@ -483,20 +567,21 @@ const xLayer=L.layerGroup().addTo(map);
 const LINKFAIL='Could not read a route from that link. Sites like Komoot and AllTrails keep route lines behind their app or login. Open the route there, download the GPX, then use Upload GPX file.';
 function addExtra(name,pts,src){
   if(pts.length>4000)pts=thin(pts,12);
-  const ll=pts.map(p=>[p[0],p[1]]),ln=L.polyline(ll,{color:'#d6336c',weight:5,opacity:.9}).addTo(xLayer);
+  const ll=pts.map(p=>[p[0],p[1]]);
   const d=document.createElement('div');d.className='it';
   const title=document.createElement('b');title.textContent=name;
-  const meta=document.createElement('span');meta.className='m';meta.textContent=mi(plen(ll))+' · '+src;
+  const meta=document.createElement('span');meta.className='m';meta.textContent=mi(plen(ll))+' · '+src;addGain(meta,pts);
   const actions=document.createElement('div');
-  ['Preview','Follow','Save','Export GPX','Remove'].forEach(l=>{const b=document.createElement('button');b.textContent=l;actions.append(b)});
+  ['Show on map','Follow','Save','Export GPX','Remove'].forEach(l=>{const b=document.createElement('button');b.textContent=l;actions.append(b)});
   const[pv,fo,sv,ex,rm]=actions.querySelectorAll('button');
-  pv.onclick=()=>{if(!xLayer.hasLayer(ln))ln.addTo(xLayer);map.fitBounds(ln.getBounds(),{padding:[40,40]})};
-  fo.onclick=()=>{xLayer.clearLayers();show({pts:ll});tabTo('follow')};
-  sv.onclick=()=>{save(name,ll,'route');toast('Saved')};
-  ex.onclick=()=>dl(name,ll);
-  rm.onclick=()=>{xLayer.removeLayer(ln);d.remove()};
+  const open=()=>show({pts,name});
+  pv.onclick=open;
+  fo.onclick=()=>{open();tabTo('follow')};
+  sv.onclick=()=>{save(name,pts,'route');toast('Saved')};
+  ex.onclick=()=>dl(name,pts);
+  rm.onclick=()=>{if(loaded===pts)clearPlan();d.remove()};
   d.append(title,meta,actions);$('lkres').prepend(d);
-  map.fitBounds(ln.getBounds(),{padding:[40,40]});
+  open();
 }
 async function getText(u,ms){
   const c=new AbortController(),t=setTimeout(()=>c.abort(),ms);
@@ -838,7 +923,7 @@ async function openFromHdsg(kind,id){
   try{
     const a=JSON.parse(localStorage.getItem('cos_active_follow')||'null');
     if(a&&Array.isArray(a.pts)&&a.pts.length>1&&Date.now()-a.t<7*24*60*60*1000){
-      loaded=a.pts;activeFollowName=a.name||'Active route';restoredFollow=true;fpts=a.pts;fcum=[0];for(let i=1;i<fpts.length;i++)fcum[i]=fcum[i-1]+LL(fpts[i-1]).distanceTo(LL(fpts[i]));fprev=Number.isFinite(a.done)?a.done:null;
+      loaded=a.pts;loadedName=a.name||'';activeFollowName=a.name||'Active route';restoredFollow=true;fpts=a.pts;fcum=[0];for(let i=1;i<fpts.length;i++)fcum[i]=fcum[i-1]+LL(fpts[i-1]).distanceTo(LL(fpts[i]));fprev=Number.isFinite(a.done)?a.done:null;
       redraw();map.invalidateSize();map.fitBounds(line.getBounds(),{padding:[40,40]});tabTo('follow');
       $('fm').textContent='Your previous route has been restored. Tap Start following to resume GPS tracking.';
       if(fprev!=null){const total=fcum[fcum.length-1],b=$('fs').querySelectorAll('b');b[0].textContent=mi(fprev);b[1].textContent=mi(Math.max(0,total-fprev));}
