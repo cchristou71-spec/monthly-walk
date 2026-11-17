@@ -567,15 +567,17 @@ document.querySelector('.tab[data-t="suggest"]').addEventListener('click',()=>{i
 const xLayer=L.layerGroup().addTo(map);
 const LINKFAIL='Could not read a route from that link. Sites like Komoot and AllTrails keep route lines behind their app or login. Open the route there, download the GPX, then use Upload GPX file.';
 function addExtra(name,pts,src){
+  const titleOf=()=>name;
   if(pts.length>4000)pts=thin(pts,12);
   const ll=pts.map(p=>[p[0],p[1]]);
   const d=document.createElement('div');d.className='it';
   const title=document.createElement('b');title.textContent=name;
   const meta=document.createElement('span');meta.className='m';meta.textContent=mi(plen(ll))+' · '+src;addGain(meta,pts);
   const actions=document.createElement('div');
-  ['Show on map','Follow','Save in app','Save to phone','Remove'].forEach(l=>{const b=document.createElement('button');b.textContent=l;actions.append(b)});
-  const[pv,fo,sv,ex,rm]=actions.querySelectorAll('button');
+  ['Show on map','Follow','Rename','Save in app','Save to phone','Remove'].forEach(l=>{const b=document.createElement('button');b.textContent=l;actions.append(b)});
+  const[pv,fo,rn,sv,ex,rm]=actions.querySelectorAll('button');
   const open=()=>show({pts,name});
+  rn.onclick=()=>{const n=(prompt('Rename route',name)||'').trim();if(!n)return;if(loaded===pts&&loadedName===name)loadedName=n;name=n;title.textContent=n;updateChip()};
   pv.onclick=open;
   fo.onclick=()=>{open();tabTo('follow')};
   sv.onclick=()=>{save(name,pts,'route');toast('Saved')};
