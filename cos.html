@@ -45,6 +45,8 @@ button.go{background:var(--route);border-color:var(--route);color:#fff;font-weig
 body.following:not(.fs) #fpill{display:flex}
 .rchip{display:none;position:absolute;z-index:1000;left:10px;bottom:34px;max-width:calc(100% - 90px);background:#fffffff2;border:1px solid var(--line);border-radius:10px;padding:6px 10px;box-shadow:0 1px 4px #0003;font-size:13px}
 .rchip.on{display:block}
+.rchip .ca{display:flex;gap:6px;margin-top:6px}
+.rchip .ca button{padding:5px 9px;font-size:12px;min-height:0}
 .rchip b{display:block;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 body.following .rchip{bottom:62px}
 button.stop{background:var(--rec);border-color:var(--rec);color:#fff;font-weight:700}
@@ -94,7 +96,7 @@ body.fs #fsbar{display:flex}
   <div id="fsbar"><div class="st"><div><b>–</b><span>Done</span></div><div><b>–</b><span>Left</span></div><div id="fso"><b>–</b><span>Off route</span></div></div><button id="fss" class="stop" aria-label="Stop following">Stop</button><button id="fsx" aria-label="Exit full screen">&#10005;</button></div>
   <button id="loc" aria-label="Show my location">&#9678;</button>
   <div id="warn" role="alert" hidden></div>
-  <div id="rchip" class="rchip"><b></b><span></span></div>
+  <div id="rchip" class="rchip"><b></b><span></span><div class="ca"><button id="csv" type="button">Save in app</button><button id="cph" type="button">Save to phone</button></div></div>
   <div id="fpill"><span>&#9679; Following</span><button id="fpx" class="stop">Stop</button></div>
 </div>
 <div id="panel">
@@ -263,6 +265,8 @@ let elevQ=Promise.resolve();
 function elevGainFt(pts){const p=elevQ.then(()=>elevCalc(pts),()=>elevCalc(pts));elevQ=p.catch(()=>{});return p.catch(()=>null)}
 function addGain(el,pts){elevGainFt(pts).then(ft=>{if(ft!=null)el.textContent+=' · ↑ '+fmtFt(ft)})}
 let gainTok=0,gainTimer=null,loadedName='',chipGain='';
+function chipSave(){if(!loaded)return;loadedName=loadedName||('Route '+new Date().toLocaleDateString('en-GB'));loadedId=saveInApp(loadedName,loaded,loadedId);updateChip()}
+function chipPhone(){if(loaded)dl(loadedName||'Route '+new Date().toLocaleDateString('en-GB'),loaded)}
 function updateChip(){
   const c=$('rchip');
   if(!loaded||!loaded.length){c.classList.remove('on');return}
@@ -322,11 +326,12 @@ document.querySelectorAll('#modes button').forEach(b=>b.onclick=async()=>{
   mode=b.dataset.m;document.querySelectorAll('#modes button').forEach(x=>x.classList.toggle('on',x===b));
   if(wps.length>1){toast('Re-snapping route…');for(const w of wps)await seg(w);redraw()}
 });
-$('sv').onclick=()=>{const p=path();if(p.length<2)return toast('Add at least two points first');
-  const n=prompt('Name this route','Route '+new Date().toLocaleDateString('en-GB'));if(n)save(n,p,'route');toast('Route saved')};
+$('sv').onclick=()=>{const p=loaded||path();if(p.length<2)return toast('Add at least two points first');
+  const n=(prompt('Name this route',loadedName||'Route '+new Date().toLocaleDateString('en-GB'))||'').trim();if(!n)return;
+  const id=saveInApp(n,p,loaded?loadedId:null);if(loaded){loadedId=id;loadedName=n;updateChip()}};
 $('sh').onclick=()=>{const p=path();if(p.length<2)return toast('Add at least two points first');
   const n=prompt('Name this route for HDSG','Route '+new Date().toLocaleDateString('en-GB'));if(!n)return;save(n,p,'route');share(n,p)};
-$('ex').onclick=()=>{const p=path();if(p.length<2)return toast('Add at least two points first');dl('Route '+new Date().toLocaleDateString('en-GB'),p)};
+$('ex').onclick=()=>{const p=loaded||path();if(p.length<2)return toast('Add at least two points first');dl(loadedName||'Route '+new Date().toLocaleDateString('en-GB'),p)};
 
 /* ---------- GPX + storage ---------- */
 function gpx(name,pts){
@@ -343,8 +348,20 @@ function dl(name,pts){
 }
 const store=()=>{try{return JSON.parse(localStorage.getItem('routes')||'[]')}catch(e){return[]}};
 const put=a=>{try{localStorage.setItem('routes',JSON.stringify(a))}catch(e){toast('Storage is full. Save routes to your phone as GPX files and delete old items.')}};
+let loadedId=null;
+const idByPts=new WeakMap();
+// Adds a route to the Saved tab, or updates it if it was saved before (id). Returns the id.
+function saveInApp(name,pts,id){
+  id=id||idByPts.get(pts)||null;
+  const a=store(),i=id?a.findIndex(q=>q.id===id):-1,now=new Date().toISOString();
+  if(i>=0){a[i]={...a[i],name,pts,dist:dist(pts),date:now};put(a);list();toast('Updated in the Saved tab');return id}
+  const nid=Date.now()+Math.random();
+  a.unshift({id:nid,name,pts,type:'route',date:now,dist:dist(pts)});put(a);list();idByPts.set(pts,nid);
+  toast(store().some(q=>q.id===nid)?'Saved in app. Find it in the Saved tab':'Could not save in app (storage full). Use Save to phone');
+  return nid;
+}
 function save(name,pts,type){const a=store();a.unshift({id:Date.now()+Math.random(),name,pts,type,date:new Date().toISOString(),dist:dist(pts)});put(a);list()}
-function show(r){sugLayer.clearLayers();clearPlan();loaded=r.pts;loadedName=r.name||'';redraw();map.fitBounds(line.getBounds(),{padding:[40,40]})}
+function show(r){sugLayer.clearLayers();clearPlan();loaded=r.pts;loadedName=r.name||'';loadedId=r.id||idByPts.get(r.pts)||null;redraw();map.fitBounds(line.getBounds(),{padding:[40,40]})}
 function list(){
   const a=store(),box=$('list');box.innerHTML=a.length?'':'<p class="m">Nothing saved yet. Save a plotted route or finish a recording.</p>';
   a.forEach(r=>{
@@ -483,6 +500,7 @@ function renderSug(s,draw,prefix){
   sugMarker=L.circleMarker([s.c.lat,s.c.lng],{radius:8,color:'#fff',weight:3,fillColor:'#2b8a3e',fillOpacity:1});
   s.list.forEach((r,i)=>{
     const color=SUGCOL[i%5],ln=L.polyline(r.pts,{color,weight:4,opacity:.9});sugLines.push(ln);
+    let sid=null;
     const d=document.createElement('div');d.className='it';
     const title=document.createElement('b');const sw=document.createElement('span');sw.className='sw';sw.style.background=color;title.append(sw,r.name);
     const meta=document.createElement('span');meta.className='m';meta.textContent=mi(r.distance)+' · passes '+(r.away/1609.344).toFixed(1)+' mi from '+from+' · OpenStreetMap';addGain(meta,r.pts);
@@ -490,8 +508,8 @@ function renderSug(s,draw,prefix){
     ['Preview','Follow','Save in app','Save to phone','Source'].forEach(l=>{const b=document.createElement('button');b.textContent=l;actions.append(b)});
     const[pv,fo,sv,ex,src]=actions.querySelectorAll('button');
     pv.onclick=()=>{if(!sugLayer.hasLayer(ln)){sugNeedsDraw=false;sugDraw()}sugPick(i)};
-    fo.onclick=()=>{show({pts:r.pts,name:r.name});tabTo('follow')};
-    sv.onclick=()=>{save(r.name,r.pts,'route');toast('Saved')};
+    fo.onclick=()=>{show({pts:r.pts,name:r.name});loadedId=sid;tabTo('follow')};
+    sv.onclick=()=>{sid=saveInApp(r.name,r.pts,sid);if(loaded===r.pts)loadedId=sid};
     ex.onclick=()=>dl(r.name,r.pts);
     src.onclick=()=>window.open('https://www.openstreetmap.org/relation/'+r.id,'_blank','noopener');
     d.append(title,meta,actions);box.append(d);
@@ -576,11 +594,12 @@ function addExtra(name,pts,src){
   const actions=document.createElement('div');
   ['Show on map','Follow','Rename','Save in app','Save to phone','Remove'].forEach(l=>{const b=document.createElement('button');b.textContent=l;actions.append(b)});
   const[pv,fo,rn,sv,ex,rm]=actions.querySelectorAll('button');
-  const open=()=>show({pts,name});
+  let savedId=null;
+  const open=()=>{show({pts,name});loadedId=savedId};
   rn.onclick=()=>{const n=(prompt('Rename route',name)||'').trim();if(!n)return;if(loaded===pts&&loadedName===name)loadedName=n;name=n;title.textContent=n;updateChip()};
   pv.onclick=open;
   fo.onclick=()=>{open();tabTo('follow')};
-  sv.onclick=()=>{save(name,pts,'route');toast('Saved')};
+  sv.onclick=()=>{savedId=saveInApp(name,pts,savedId);if(loaded===pts)loadedId=savedId};
   ex.onclick=()=>dl(name,pts);
   rm.onclick=()=>{if(loaded===pts)clearPlan();d.remove()};
   d.append(title,meta,actions);$('lkres').prepend(d);
@@ -717,6 +736,8 @@ let activeFollowName='Active route',restoredFollow=false;
 $('fsb').onclick=()=>setFS(true);
 $('fsx').onclick=()=>setFS(false);
 $('fpx').onclick=()=>stopFollow();
+$('csv').onclick=chipSave;
+$('cph').onclick=chipPhone;
 $('fclr').onclick=()=>{if(fw!=null)stopFollow();try{localStorage.removeItem('cos_active_follow')}catch(e){}clearPlan();fpts=[];fprev=null;restoredFollow=false;sugLayer.clearLayers();$('fm').textContent='Route cleared. Plot, load or pick a route to follow.';document.querySelectorAll('#fs b,#fsbar .st b').forEach(b=>b.textContent='–')};
 $('fss').onclick=()=>{if(fw!=null)stopFollow();setFS(false)};
 $('fb').onclick=()=>{
