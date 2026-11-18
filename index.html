@@ -2424,6 +2424,49 @@ function App() {
     flashToast('Route added');
   };
 
+  // ---- Inline route editing from the Route & Map tab (organisers only) ----
+  const [routeLinkDraft, setRouteLinkDraft] = useState('');
+  useEffect(() => { setRouteLinkDraft(selectedEvent && selectedEvent.route_link ? selectedEvent.route_link : ''); }, [selectedEventId, selectedEvent && selectedEvent.route_link]);
+
+  const saveWalkRoutePatch = async (patch, okMsg) => {
+    if (!selectedEvent || !isOrganiserOfSelected) { flashToast("Only this walk's organiser can change the route"); return; }
+    const { error } = await sb.from('walk_events').update({ ...patch, updated_at: new Date().toISOString() }).eq('id', selectedEvent.id);
+    if (error) { flashToast('Could not save — try again'); return; }
+    flashToast(okMsg);
+    loadAll();
+  };
+
+  const attachGpxToWalk = (text, name) => {
+    const points = parseGpxPoints(text);
+    if (points.length === 0) { flashToast('Could not read a route from that file'); return; }
+    const patch = { gpx_content: text, gpx_filename: name };
+    if (selectedEvent.start_lat == null) { patch.start_lat = points[0].lat; patch.start_lng = points[0].lng; }
+    if (selectedEvent.end_lat == null) { patch.end_lat = points[points.length - 1].lat; patch.end_lng = points[points.length - 1].lng; }
+    saveWalkRoutePatch(patch, 'Route saved');
+  };
+
+  const handleInlineGpxFile = (e) => {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = '';
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) { flashToast('GPX file is too large (max 5MB)'); return; }
+    const reader = new FileReader();
+    reader.onload = () => attachGpxToWalk(String(reader.result || ''), file.name);
+    reader.onerror = () => flashToast('Could not read that file');
+    reader.readAsText(file);
+  };
+
+  const removeWalkGpx = () => {
+    if (!window.confirm('Remove the GPX route from this walk?')) return;
+    saveWalkRoutePatch({ gpx_content: null, gpx_filename: null }, 'Route removed');
+  };
+
+  const saveWalkRouteLink = () => {
+    const v = cleanLink(routeLinkDraft);
+    setRouteLinkDraft(v);
+    saveWalkRoutePatch({ route_link: v || null }, v ? 'Route link saved' : 'Route link removed');
+  };
+
   const toggleFormOrganiser = (name) => {
     setForm(f => {
       const has = f.organisers.includes(name);
@@ -2656,6 +2699,29 @@ function App() {
 
               {selectedWalkSection === 'route' && (
               <div className="card">
+                {isOrganiserOfSelected && (
+                  <div style={{marginBottom:16, paddingBottom:14, borderBottom:'1px solid var(--line)'}}>
+                    <div className="field">
+                      <label>GPX route file</label>
+                      {selectedEvent.gpx_content && (
+                        <div className="gpx-attach">
+                          <span>📄 {selectedEvent.gpx_filename || 'Route attached'}</span>
+                          <button onClick={removeWalkGpx}>Remove</button>
+                        </div>
+                      )}
+                      <p style={{fontSize:12, color:'#8a9089', margin:'6px 0'}}>{selectedEvent.gpx_content ? 'Replace with a different file:' : 'Upload a GPX track and everyone opening this walk will see it on a map.'}</p>
+                      <input type="file" accept=".gpx" onChange={handleInlineGpxFile} />
+                      <CosRoutePicker onPick={attachGpxToWalk} />
+                    </div>
+                    <div className="field">
+                      <label>Route link</label>
+                      <RouteLinkField value={routeLinkDraft} onChange={setRouteLinkDraft} />
+                      {cleanLink(routeLinkDraft) !== (selectedEvent.route_link || '') && (
+                        <button className="btn small" style={{marginTop:8}} onClick={saveWalkRouteLink}>Save link</button>
+                      )}
+                    </div>
+                  </div>
+                )}
                 {selectedEvent.route_link && (
                   <div className="route-links" style={{marginTop:10}}>
                     <a className="link-chip" target="_blank" rel="noopener noreferrer" href={cleanLink(selectedEvent.route_link)}>
