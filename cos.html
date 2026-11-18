@@ -82,6 +82,8 @@ button:focus-visible,input:focus-visible,.tab:focus-visible{outline:3px solid #1
 body.fs #panel,body.fs #sb,body.fs #res{display:none}
 #fsbar{display:none;position:absolute;z-index:1050;top:calc(10px + env(safe-area-inset-top,0px));left:10px;right:10px;gap:6px;align-items:stretch}
 body.fs #fsbar{display:flex}
+body.fs #ctl .leaflet-top{margin-top:64px}
+body.fs #compass{top:206px}
 #fsbar .st{flex:1;display:grid;grid-template-columns:repeat(3,1fr);gap:4px;background:#fffffff2;border:1px solid var(--line);border-radius:10px;padding:5px 8px}
 #fsbar .st b{display:block;font-size:17px}
 #fsbar .st span{font-size:11px;color:var(--muted)}
@@ -734,6 +736,8 @@ function checkWarn(ll,r){
 }
 function setFS(on){
   document.body.classList.toggle('fs',on);
+  if(on)startCompass();else if(fw==null)hd=null;
+  applyRot();updateFss();
   try{
     const d=document,e=d.documentElement;
     if(on&&!d.fullscreenElement&&e.requestFullscreen)e.requestFullscreen({navigationUI:'hide'}).catch(()=>{});
@@ -742,7 +746,7 @@ function setFS(on){
   setTimeout(()=>{map.invalidateSize();if(on&&$('ac').checked&&map.hasLayer(me))map.panTo(me.getLatLng())},150);
 }
 document.addEventListener('fullscreenchange',()=>{if(!document.fullscreenElement&&document.body.classList.contains('fs'))setFS(false)});
-function stopFollow(){if(fw!=null)navigator.geolocation.clearWatch(fw);fw=null;document.body.classList.remove('following');hd=null;applyRot();try{localStorage.removeItem('cos_active_follow')}catch(e){}setWarn(null);$('fb').textContent='Start following';$('fb').className='go';$('fo').classList.remove('off');$('fso').classList.remove('off');unwake();setFS(false)}
+function stopFollow(){if(fw!=null)navigator.geolocation.clearWatch(fw);fw=null;document.body.classList.remove('following');if(!document.body.classList.contains('fs'))hd=null;applyRot();updateFss();try{localStorage.removeItem('cos_active_follow')}catch(e){}setWarn(null);$('fb').textContent='Start following';$('fb').className='go';$('fo').classList.remove('off');$('fso').classList.remove('off');unwake();setFS(false)}
 function persistFollow(done){try{localStorage.setItem('cos_active_follow',JSON.stringify({pts:fpts,name:activeFollowName||'Active route',done:done==null?fprev:done,t:Date.now()}))}catch(e){}}
 let activeFollowName='Active route',restoredFollow=false;
 $('fsb').onclick=()=>setFS(true);
@@ -758,7 +762,8 @@ $('rchip').onclick=e=>{if(e.target.closest('.ca'))return;$('rchip').classList.to
 $('csv').onclick=chipSave;
 $('cph').onclick=chipPhone;
 $('fclr').onclick=()=>{if(fw!=null)stopFollow();try{localStorage.removeItem('cos_active_follow')}catch(e){}clearPlan();fpts=[];fprev=null;restoredFollow=false;sugLayer.clearLayers();$('fm').textContent='Route cleared. Plot, load or pick a route to follow.';document.querySelectorAll('#fs b,#fsbar .st b').forEach(b=>b.textContent='–')};
-$('fss').onclick=()=>{if(fw!=null)stopFollow();setFS(false)};
+function updateFss(){const f=$('fss');if(!f)return;const on=fw!=null;f.textContent=on?'Stop':'Start';f.className=on?'stop':'go';f.setAttribute('aria-label',on?'Stop following':'Start following')}
+$('fss').onclick=()=>{if(fw==null){$('fb').click();updateFss()}else{stopFollow();setFS(false)}};
 $('fb').onclick=()=>{
   if(fw!=null)return stopFollow();
   fpts=path();if(fpts.length<2)return toast('Plot or load a route first');
@@ -774,7 +779,7 @@ $('fb').onclick=()=>{
     const hb=$('fsbar').querySelectorAll('.st b');hb[0].textContent=b[0].textContent;hb[1].textContent=b[1].textContent;hb[2].textContent=b[2].textContent;$('fso').classList.toggle('off',r.off>40);
     checkWarn(ll,r);
   },gerr,{enableHighAccuracy:true,maximumAge:2000});
-  $('fb').textContent='Stop following';$('fb').className='stop';document.body.classList.add('following');startCompass();applyRot();wake();
+  $('fb').textContent='Stop following';$('fb').className='stop';document.body.classList.add('following');startCompass();applyRot();updateFss();wake();
 };
 
 /* ---------- compass + heading-up map while following ---------- */
@@ -782,7 +787,7 @@ let headUp=true,hd=null,rotActive=false,rotKey='',rotTimer=0,lastGps=0,compassFn
 function setNeedle(deg){const n=$('cneedle');if(n)n.setAttribute('transform','rotate('+deg.toFixed(1)+' 20 20)')}
 // Turns the map so the direction you are facing is up. The compass needle keeps pointing at north.
 function applyRot(){
-  const w=$('wrap'),el=$('map'),following=document.body.classList.contains('following');
+  const w=$('wrap'),el=$('map'),following=document.body.classList.contains('following')||document.body.classList.contains('fs');
   $('compass').hidden=!following;
   const want=following&&headUp&&hd!=null;
   if(!want){
