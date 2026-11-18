@@ -19,7 +19,10 @@
 *{box-sizing:border-box}
 html,body{height:100%;margin:0}
 body{display:flex;flex-direction:column;font:15px/1.35 system-ui,-apple-system,"Segoe UI",sans-serif;color:var(--ink);background:var(--paper)}
-#wrap{position:relative;flex:1;min-height:0}
+#wrap{position:relative;flex:1;min-height:0;overflow:hidden}
+#ctl{position:absolute;inset:0;z-index:900;background:none;pointer-events:none;overflow:hidden}
+#compass{position:absolute;z-index:1000;right:10px;top:142px;width:46px;height:46px;padding:0;border-radius:50%;background:#fffffff2;border:2px solid rgba(0,0,0,.2);min-height:0;display:flex;align-items:center;justify-content:center}
+#compass[hidden]{display:none}
 #map{position:absolute;inset:0}
 #sb{position:absolute;z-index:1000;top:calc(10px + env(safe-area-inset-top,0px));left:10px;width:calc(100% - 76px);max-width:460px;display:flex;flex-direction:column;gap:6px}
 #q{flex:1;min-width:0}
@@ -41,9 +44,9 @@ body{display:flex;flex-direction:column;font:15px/1.35 system-ui,-apple-system,"
 button{font:inherit;padding:8px 12px;border:1px solid var(--line);background:#fff;border-radius:8px;color:var(--ink)}
 button.on{background:var(--ink);color:#fff;border-color:var(--ink)}
 button.go{background:var(--route);border-color:var(--route);color:#fff;font-weight:700}
-#fpill{display:none;position:absolute;z-index:1000;left:10px;bottom:12px;align-items:center;gap:10px;background:#fffffff2;border:1px solid var(--line);border-radius:999px;padding:5px 6px 5px 14px;font-weight:700;box-shadow:0 1px 4px #0003}
+#fpill{display:none;position:absolute;z-index:1000;left:10px;bottom:30px;align-items:center;gap:10px;background:#fffffff2;border:1px solid var(--line);border-radius:999px;padding:5px 6px 5px 14px;font-weight:700;box-shadow:0 1px 4px #0003}
 body.following:not(.fs) #fpill{display:flex}
-.rchip{display:none;position:absolute;z-index:1000;left:10px;bottom:34px;max-width:calc(100% - 90px);background:#fffffff2;border:1px solid var(--line);border-radius:10px;padding:6px 10px;box-shadow:0 1px 4px #0003;font-size:13px}
+.rchip{display:none;position:absolute;z-index:1000;left:10px;bottom:30px;max-width:calc(100% - 90px);background:#fffffff2;border:1px solid var(--line);border-radius:10px;padding:6px 10px;box-shadow:0 1px 4px #0003;font-size:13px}
 .rchip.on{display:block}
 .rchip .ca{display:none;gap:6px;margin-top:6px}
 .rchip.open .ca{display:flex}
@@ -54,7 +57,7 @@ body.following:not(.fs) #fpill{display:flex}
 #panel.min #phandle{margin:0}
 .rchip .ca button{padding:5px 9px;font-size:12px;min-height:0}
 .rchip b{display:block;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-body.following .rchip{bottom:62px}
+body.following .rchip{bottom:78px}
 button.stop{background:var(--rec);border-color:var(--rec);color:#fff;font-weight:700}
 button:disabled{opacity:.5}
 button:focus-visible,input:focus-visible,.tab:focus-visible{outline:3px solid #1c7ed6;outline-offset:2px}
@@ -102,6 +105,7 @@ body.fs #fsbar{display:flex}
   <div id="fsbar"><div class="st"><div><b>–</b><span>Done</span></div><div><b>–</b><span>Left</span></div><div id="fso"><b>–</b><span>Off route</span></div></div><button id="fss" class="stop" aria-label="Stop following">Stop</button><button id="fsx" aria-label="Exit full screen">&#10005;</button></div>
   <button id="loc" aria-label="Show my location">&#9678;</button>
   <div id="warn" role="alert" hidden></div>
+  <button id="compass" type="button" hidden aria-label="Compass. Tap to switch between turning the map and north at the top"><svg viewBox="0 0 40 40" width="40" height="40" aria-hidden="true"><g id="cneedle"><polygon points="20,3 26,20 14,20" fill="#d6336c"/><polygon points="20,37 26,20 14,20" fill="#868e96"/><circle cx="20" cy="20" r="2.2" fill="#fff"/></g><text x="20" y="13" font-size="8" font-weight="700" text-anchor="middle" fill="#fff" style="pointer-events:none"></text></svg></button>
   <div id="rchip" class="rchip"><b></b><span></span><div class="ca"><button id="csv" type="button">Save in app</button><button id="cph" type="button">Save to phone</button></div></div>
   <div id="fpill"><span>&#9679; Following</span><button id="fpx" class="stop">Stop</button></div>
 </div>
@@ -200,6 +204,7 @@ const osm=new CT('',{id:'osm',maxZoom:19,attribution:at});
 const topo=new CT('',{id:'topo',maxZoom:17,attribution:at+', SRTM | OpenTopoMap'});
 osm.addTo(map);let base=osm;
 L.control.layers({'Streets':osm,'Terrain':topo},null,{position:'topright'}).addTo(map);
+{const ctl=document.createElement('div');ctl.id='ctl';ctl.className='leaflet-container leaflet-touch';ctl.appendChild(map._controlContainer);$('wrap').appendChild(ctl)} // keeps the buttons upright when the map turns
 map.on('baselayerchange',e=>base=e.layer);
 new ResizeObserver(()=>map.invalidateSize()).observe($('wrap'));
 
@@ -326,7 +331,7 @@ async function add1(ll){
   await seg(w);redraw();
 }
 function clearPlan(){wps.forEach(w=>map.removeLayer(w.m));wps=[];loaded=null;redraw()}
-map.on('click',e=>{if(!$('res').hidden){$('res').hidden=true;return}if(tab==='plot')addWp(e.latlng)});
+map.on('click',e=>{if(rotActive)return;if(!$('res').hidden){$('res').hidden=true;return}if(tab==='plot')addWp(e.latlng)});
 $('undo').onclick=()=>{if(loaded)return toast('Clear the loaded route first');const w=wps.pop();if(w){map.removeLayer(w.m);redraw()}};
 $('clr').onclick=clearPlan;
 document.querySelectorAll('#modes button').forEach(b=>b.onclick=async()=>{
@@ -737,7 +742,7 @@ function setFS(on){
   setTimeout(()=>{map.invalidateSize();if(on&&$('ac').checked&&map.hasLayer(me))map.panTo(me.getLatLng())},150);
 }
 document.addEventListener('fullscreenchange',()=>{if(!document.fullscreenElement&&document.body.classList.contains('fs'))setFS(false)});
-function stopFollow(){if(fw!=null)navigator.geolocation.clearWatch(fw);fw=null;document.body.classList.remove('following');try{localStorage.removeItem('cos_active_follow')}catch(e){}setWarn(null);$('fb').textContent='Start following';$('fb').className='go';$('fo').classList.remove('off');$('fso').classList.remove('off');unwake();setFS(false)}
+function stopFollow(){if(fw!=null)navigator.geolocation.clearWatch(fw);fw=null;document.body.classList.remove('following');hd=null;applyRot();try{localStorage.removeItem('cos_active_follow')}catch(e){}setWarn(null);$('fb').textContent='Start following';$('fb').className='go';$('fo').classList.remove('off');$('fso').classList.remove('off');unwake();setFS(false)}
 function persistFollow(done){try{localStorage.setItem('cos_active_follow',JSON.stringify({pts:fpts,name:activeFollowName||'Active route',done:done==null?fprev:done,t:Date.now()}))}catch(e){}}
 let activeFollowName='Active route',restoredFollow=false;
 $('fsb').onclick=()=>setFS(true);
@@ -762,15 +767,78 @@ $('fb').onclick=()=>{
   fcum=[0];for(let i=1;i<fpts.length;i++)fcum[i]=fcum[i-1]+LL(fpts[i-1]).distanceTo(LL(fpts[i]));
   const tot=fcum[fcum.length-1];
   fw=navigator.geolocation.watchPosition(p=>{
-    const ll=showMe(p);if($('ac').checked)map.panTo(ll);
+    const ll=showMe(p);gpsHeading(p);if($('ac').checked)map.panTo(ll);
     const r=snapTo(ll,fprev),b=$('fs').querySelectorAll('b');fprev=r.done;persistFollow(fprev);
     b[0].textContent=mi(r.done);b[1].textContent=mi(Math.max(0,tot-r.done));b[2].textContent=Math.round(r.off*3.28084)+' ft';
     $('fo').classList.toggle('off',r.off>40);
     const hb=$('fsbar').querySelectorAll('.st b');hb[0].textContent=b[0].textContent;hb[1].textContent=b[1].textContent;hb[2].textContent=b[2].textContent;$('fso').classList.toggle('off',r.off>40);
     checkWarn(ll,r);
   },gerr,{enableHighAccuracy:true,maximumAge:2000});
-  $('fb').textContent='Stop following';$('fb').className='stop';document.body.classList.add('following');wake();
+  $('fb').textContent='Stop following';$('fb').className='stop';document.body.classList.add('following');startCompass();applyRot();wake();
 };
+
+/* ---------- compass + heading-up map while following ---------- */
+let headUp=true,hd=null,rotActive=false,rotKey='',rotTimer=0,lastGps=0,compassFn=null;
+function setNeedle(deg){const n=$('cneedle');if(n)n.setAttribute('transform','rotate('+deg.toFixed(1)+' 20 20)')}
+// Turns the map so the direction you are facing is up. The compass needle keeps pointing at north.
+function applyRot(){
+  const w=$('wrap'),el=$('map'),following=document.body.classList.contains('following');
+  $('compass').hidden=!following;
+  const want=following&&headUp&&hd!=null;
+  if(!want){
+    if(rotActive){
+      rotActive=false;rotKey='';
+      ['left','top','width','height','transform','inset'].forEach(k=>el.style[k]='');
+      map.options.touchZoom=true;map.dragging.enable();map.doubleClickZoom.enable();
+      map.invalidateSize({animate:false});
+    }
+    setNeedle(0);return;
+  }
+  const W=w.clientWidth,H=w.clientHeight,D=Math.ceil(Math.hypot(W,H)),key=W+','+H;
+  if(!rotActive||key!==rotKey){
+    el.style.inset='auto';el.style.width=D+'px';el.style.height=D+'px';
+    el.style.left=((W-D)/2)+'px';el.style.top=((H-D)/2)+'px';
+    rotKey=key;
+    if(!rotActive){rotActive=true;map.options.touchZoom='center';map.dragging.disable();map.doubleClickZoom.disable()}
+    map.invalidateSize({animate:false});
+  }
+  el.style.transform='rotate('+(-hd).toFixed(1)+'deg)';
+  setNeedle(-hd);
+}
+function setHeading(h,k){
+  if(h==null||!isFinite(h))return;
+  h=((h%360)+360)%360;
+  if(hd==null)hd=h;else{const d=((h-hd+540)%360)-180;hd=(hd+d*(k||.35)+360)%360}
+  if(!rotTimer)rotTimer=setTimeout(()=>{rotTimer=0;applyRot()},120);
+}
+function gpsHeading(p){
+  const c=p.coords;
+  if(Number.isFinite(c.heading)&&Number.isFinite(c.speed)&&c.speed>0.8){lastGps=Date.now();setHeading(c.heading,.5)}
+}
+function startCompass(){
+  if(compassFn)return;
+  const R=Math.PI/180;
+  const fn=e=>{
+    if(Date.now()-lastGps<4000)return;
+    let h=null;
+    if(typeof e.webkitCompassHeading==='number')h=e.webkitCompassHeading;
+    else if(e.absolute&&e.alpha!=null&&e.beta!=null&&e.gamma!=null){
+      const a=e.alpha*R,b=e.beta*R,g=e.gamma*R;
+      const Vx=-Math.cos(a)*Math.sin(g)-Math.sin(a)*Math.sin(b)*Math.cos(g);
+      const Vy=-Math.sin(a)*Math.sin(g)+Math.cos(a)*Math.sin(b)*Math.cos(g);
+      h=Math.atan2(Vx,Vy)/R;
+    }
+    if(h!=null)setHeading(h,.25);
+  };
+  const go=()=>{compassFn=fn;window.addEventListener('deviceorientationabsolute',fn,true);window.addEventListener('deviceorientation',fn,true)};
+  try{
+    if(typeof DeviceOrientationEvent!=='undefined'&&typeof DeviceOrientationEvent.requestPermission==='function')
+      DeviceOrientationEvent.requestPermission().then(s=>{if(s==='granted')go()}).catch(()=>{});
+    else go();
+  }catch(e){}
+}
+$('compass').onclick=()=>{headUp=!headUp;toast(headUp?'Map turns as you move. Tap the compass for north at the top.':'North is at the top. Tap the compass to turn the map as you move.');applyRot()};
+if(window.ResizeObserver)new ResizeObserver(()=>{if(rotActive)applyRot()}).observe($('wrap'));
 
 /* ---------- record ---------- */
 const rline=L.polyline([],{color:'#c2255c',weight:5}).addTo(map);
