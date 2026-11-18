@@ -45,9 +45,15 @@ button.go{background:var(--route);border-color:var(--route);color:#fff;font-weig
 body.following:not(.fs) #fpill{display:flex}
 .rchip{display:none;position:absolute;z-index:1000;left:10px;bottom:34px;max-width:calc(100% - 90px);background:#fffffff2;border:1px solid var(--line);border-radius:10px;padding:6px 10px;box-shadow:0 1px 4px #0003;font-size:13px}
 .rchip.on{display:block}
-.rchip .ca{display:flex;gap:6px;margin-top:6px}
+.rchip .ca{display:none;gap:6px;margin-top:6px}
+.rchip.open .ca{display:flex}
+.rchip{cursor:pointer;padding:4px 9px}
+#phandle{display:block;width:100%;min-height:0;margin:-4px 0 4px;padding:2px 0;border:0;background:none;color:var(--muted,#555);font-size:12px}
+#panel.min>*:not(#phandle){display:none}
+#panel.min{padding-top:2px;padding-bottom:calc(2px + env(safe-area-inset-bottom,0px))}
+#panel.min #phandle{margin:0}
 .rchip .ca button{padding:5px 9px;font-size:12px;min-height:0}
-.rchip b{display:block;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rchip b{display:block;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 body.following .rchip{bottom:62px}
 button.stop{background:var(--rec);border-color:var(--rec);color:#fff;font-weight:700}
 button:disabled{opacity:.5}
@@ -100,6 +106,7 @@ body.fs #fsbar{display:flex}
   <div id="fpill"><span>&#9679; Following</span><button id="fpx" class="stop">Stop</button></div>
 </div>
 <div id="panel">
+  <button id="phandle" type="button">&#9662; Hide options (bigger map)</button>
   <div id="tabs" role="tablist">
     <button class="tab on" data-t="plot">Plot</button>
     <button class="tab" data-t="suggest">Suggest</button>
@@ -271,7 +278,7 @@ function updateChip(){
   const c=$('rchip');
   if(!loaded||!loaded.length){c.classList.remove('on');return}
   c.querySelector('b').textContent=loadedName||'Route';
-  c.querySelector('span').textContent=$('pd').textContent+(chipGain?' · '+chipGain:'');
+  c.querySelector('span').textContent=$('pd').textContent+(chipGain?' · '+chipGain:'')+(c.classList.contains('open')?' · ▴':' · Save ▾');
   c.classList.add('on');
 }
 function showGain(pts){
@@ -371,7 +378,7 @@ function list(){
     const mt=d.querySelector('span');mt.textContent=(r.type==='track'?'Recorded':'Planned')+', '+mi(r.dist)+', '+new Date(r.date).toLocaleDateString('en-GB');addGain(mt,r.pts);
     const [s,f,rn,g,sb2,x]=d.querySelectorAll('button');
     rn.onclick=()=>{const n=(prompt('Rename route',r.name)||'').trim();if(!n)return;const a=store(),q=a.find(z=>z.id===r.id);if(q){q.name=n;put(a);if(loadedName===r.name){loadedName=n;updateChip()}list()}};
-    s.onclick=()=>{show(r);tabTo('plot')};
+    s.onclick=()=>{show(r);tabTo('plot');setPanelMin(true)};
     f.onclick=()=>{show(r);tabTo('follow')};
     g.onclick=()=>dl(r.name,r.pts);
     sb2.onclick=()=>share(r.name,r.pts);
@@ -597,7 +604,7 @@ function addExtra(name,pts,src){
   let savedId=null;
   const open=()=>{show({pts,name});loadedId=savedId};
   rn.onclick=()=>{const n=(prompt('Rename route',name)||'').trim();if(!n)return;if(loaded===pts&&loadedName===name)loadedName=n;name=n;title.textContent=n;updateChip()};
-  pv.onclick=open;
+  pv.onclick=()=>{open();setPanelMin(true)};
   fo.onclick=()=>{open();tabTo('follow')};
   sv.onclick=()=>{savedId=saveInApp(name,pts,savedId);if(loaded===pts)loadedId=savedId};
   ex.onclick=()=>dl(name,pts);
@@ -736,6 +743,13 @@ let activeFollowName='Active route',restoredFollow=false;
 $('fsb').onclick=()=>setFS(true);
 $('fsx').onclick=()=>setFS(false);
 $('fpx').onclick=()=>stopFollow();
+function setPanelMin(on){
+  $('panel').classList.toggle('min',on);
+  $('phandle').textContent=on?'\u25B4 Show options':'\u25BE Hide options (bigger map)';
+  setTimeout(()=>map.invalidateSize(),50);
+}
+$('phandle').onclick=()=>setPanelMin(!$('panel').classList.contains('min'));
+$('rchip').onclick=e=>{if(e.target.closest('.ca'))return;$('rchip').classList.toggle('open');updateChip()};
 $('csv').onclick=chipSave;
 $('cph').onclick=chipPhone;
 $('fclr').onclick=()=>{if(fw!=null)stopFollow();try{localStorage.removeItem('cos_active_follow')}catch(e){}clearPlan();fpts=[];fprev=null;restoredFollow=false;sugLayer.clearLayers();$('fm').textContent='Route cleared. Plot, load or pick a route to follow.';document.querySelectorAll('#fs b,#fsbar .st b').forEach(b=>b.textContent='–')};
